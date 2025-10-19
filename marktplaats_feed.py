@@ -29,13 +29,14 @@ def fetch_google_feed():
     resp.raise_for_status()
     return ET.fromstring(resp.content)
 
-def parse_price_eur(item):
+def parse_price_cents(item):
+    """Parse prijs uit Google feed en zet om naar centen (integer string)."""
     raw = (item.findtext("g:price", default="", namespaces=NS) or item.findtext("price", default="")).strip()
     if not raw:
         return None
     value = raw.replace("EUR", "").strip().replace(",", ".")
     try:
-        return f"{float(value):.2f}"
+        return str(int(round(float(value) * 100)))
     except ValueError:
         return None
 
@@ -72,11 +73,11 @@ def create_marktplaats_feed(google_root):
         # Category
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}categoryId").text = CATEGORY_ID
 
-        # Price
-        price_eur = parse_price_eur(item)
-        if price_eur:
+        # Price in centen
+        price_cents = parse_price_cents(item)
+        if price_cents:
             price_el = ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}price", currency="EUR")
-            price_el.text = price_eur
+            price_el.text = price_cents
 
         # Location
         loc = ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}location")
