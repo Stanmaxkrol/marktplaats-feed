@@ -15,6 +15,7 @@ VENDOR_ID = "55743253"
 
 PHONE_NUMBER = "+31582124300"
 EMAIL_ADVERTISER = "true"
+SELLER_NAME = "Aquariumhuis Friesland"
 
 NS = {"g": "http://base.google.com/ns/1.0"}
 
@@ -58,6 +59,9 @@ def create_marktplaats_feed(google_root):
         # Vendor ID (verplicht)
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}vendorId").text = VENDOR_ID
 
+        # Seller name
+        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}sellerName").text = SELLER_NAME
+
         # External ID
         external_id = item.findtext("g:id", default="", namespaces=NS) or item.findtext("id", default="")
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}externalId").text = external_id.strip()
@@ -90,6 +94,9 @@ def create_marktplaats_feed(google_root):
         # Product URL
         product_url = item.findtext("link", default="").strip()
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}url").text = product_url
+
+        # Vanity URL (zelfde als product_url)
+        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}vanityUrl").text = product_url
 
         # Images
         images_el = ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}images")
