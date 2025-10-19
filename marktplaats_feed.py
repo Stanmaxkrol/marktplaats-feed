@@ -62,10 +62,6 @@ def create_marktplaats_feed(google_root):
         # Seller name
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}sellerName").text = SELLER_NAME
 
-        # External ID
-        external_id = item.findtext("g:id", default="", namespaces=NS) or item.findtext("id", default="")
-        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}externalId").text = external_id.strip()
-
         # Title & Description met CDATA
         title = item.findtext("title", default="").strip()
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}title").text = cdata(title)
