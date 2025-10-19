@@ -8,21 +8,20 @@ app = Flask(__name__)
 # Config
 GOOGLE_FEED_URL = "https://aquariumhuis-friesland.webnode.nl/rss/pf-google_eur.xml"
 CATEGORY_ID = "396"           # Marktplaats categoryId
-CONDITION = "NEW"             # Toegestane waarden: NEW, USED, REFURBISHED (afhankelijk van XSD)
+CONDITION = "NEW"             # Toegestane waarden: NEW, USED, REFURBISHED
 CITY = "Leeuwarden"
 ZIPCODE = "8921SR"
 SHIPPING_OPTIONS = [
-    {"type": "PICKUP"},  # Ophalen
+    {"type": "PICKUP"},
     {"type": "DELIVERY", "cost": "0", "description": "Gratis vanaf €49,-"},
 ]
+VENDOR_ID = "55743253"
 
 NS = {"g": "http://base.google.com/ns/1.0"}
-
 
 @app.route("/api/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok"}), 200
-
 
 def fetch_google_feed():
     headers = {"User-Agent": "Marktplaats Feed Adapter/1.0"}
@@ -30,58 +29,23 @@ def fetch_google_feed():
     resp.raise_for_status()
     return ET.fromstring(resp.content)
 
-
 def parse_price_eur(item):
-    """Return price in euros as string, e.g. '12.95' (no currency suffix)."""
     raw = (item.findtext("g:price", default="", namespaces=NS) or item.findtext("price", default="")).strip()
     if not raw:
         return None
-    # Examples: "12.95 EUR", "12,95 EUR", "12.95"
-    value = raw.replace("EUR", "").strip()
-    value = value.replace(",", ".")
+    value = raw.replace("EUR", "").strip().replace(",", ".")
     try:
-        # Keep two decimals as text
-        num = float(value)
-        return f"{num:.2f}"
+        return f"{float(value):.2f}"
     except ValueError:
         return None
 
+def cdata(text):
+    return f"<![CDATA[{text}]]>"
 
 def create_marktplaats_feed(google_root):
-    """
-    Bouw XSD-conforme feed:
-    <ads>
-      <ad>
-        <externalId>...</externalId>
-        <title>...</title>
-        <description>...</description>
-        <categoryId>396</categoryId>
-        <price currency="EUR">12.95</price>
-        <location>
-          <zipcode>8921SR</zipcode>
-          <city>Leeuwarden</city>
-        </location>
-        <condition>NEW</condition>
-        <url>https://...</url>
-        <images>
-          <image url="https://..."/>
-        </images>
-        <shippingOptions>
-          <shippingOption>
-            <type>PICKUP</type>
-          </shippingOption>
-          <shippingOption>
-            <type>DELIVERY</type>
-            <cost>0</cost>
-            <description>Gratis vanaf €49,-</description>
-          </shippingOption>
-        </shippingOptions>
-      </ad>
-    </ads>
-    """
-    root = ET.Element("ads")
+    ET.register_namespace('admarkt', 'http://admarkt.marktplaats.nl/schemas/1.0')
+    root = ET.Element("{http://admarkt.marktplaats.nl/schemas/1.0}ads")
 
-    # Ondersteun <rss><channel><item> alsook los <item>
     items = google_root.findall(".//item")
     if not items:
         channel = google_root.find(".//channel")
@@ -89,56 +53,60 @@ def create_marktplaats_feed(google_root):
             items = channel.findall(".//item")
 
     for item in items:
-        ad = ET.SubElement(root, "ad")
+        ad = ET.SubElement(root, "{http://admarkt.marktplaats.nl/schemas/1.0}ad")
 
-        # IDs & basis
+        # Vendor ID (verplicht)
+        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}vendorId").text = VENDOR_ID
+
+        # External ID
         external_id = item.findtext("g:id", default="", namespaces=NS) or item.findtext("id", default="")
-        ET.SubElement(ad, "externalId").text = external_id.strip()
+        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}externalId").text = external_id.strip()
 
+        # Title & Description met CDATA
         title = item.findtext("title", default="").strip()
-        ET.SubElement(ad, "title").text = title
+        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}title").text = cdata(title)
 
         description = item.findtext("description", default="").strip()
-        ET.SubElement(ad, "description").text = description
+        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}description").text = cdata(description)
 
-        ET.SubElement(ad, "categoryId").text = CATEGORY_ID
+        # Category
+        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}categoryId").text = CATEGORY_ID
 
-        # Prijs (EUR met attribuut currency)
+        # Price
         price_eur = parse_price_eur(item)
         if price_eur:
-            price_el = ET.SubElement(ad, "price", currency="EUR")
+            price_el = ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}price", currency="EUR")
             price_el.text = price_eur
 
-        # Locatie
-        loc = ET.SubElement(ad, "location")
-        ET.SubElement(loc, "zipcode").text = ZIPCODE
-        ET.SubElement(loc, "city").text = CITY
+        # Location
+        loc = ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}location")
+        ET.SubElement(loc, "{http://admarkt.marktplaats.nl/schemas/1.0}zipcode").text = ZIPCODE
+        ET.SubElement(loc, "{http://admarkt.marktplaats.nl/schemas/1.0}city").text = CITY
 
-        # Conditie
-        ET.SubElement(ad, "condition").text = CONDITION
+        # Condition
+        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}condition").text = CONDITION
 
-        # URL (product link)
+        # Product URL
         product_url = item.findtext("link", default="").strip()
-        ET.SubElement(ad, "url").text = product_url
+        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}url").text = product_url
 
-        # Afbeeldingen (één of meer)
-        images_el = ET.SubElement(ad, "images")
+        # Images
+        images_el = ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}images")
         image_url = (item.findtext("g:image_link", default="", namespaces=NS) or item.findtext("image_link", default="")).strip()
         if image_url:
-            ET.SubElement(images_el, "image", url=image_url)
+            ET.SubElement(images_el, "{http://admarkt.marktplaats.nl/schemas/1.0}image", url=image_url)
 
-        # Verzendopties (PICKUP/DELIVERY)
-        shipping_el = ET.SubElement(ad, "shippingOptions")
+        # Shipping options
+        shipping_el = ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}shippingOptions")
         for opt in SHIPPING_OPTIONS:
-            so = ET.SubElement(shipping_el, "shippingOption")
-            ET.SubElement(so, "type").text = opt.get("type", "").strip()
+            so = ET.SubElement(shipping_el, "{http://admarkt.marktplaats.nl/schemas/1.0}shippingOption")
+            ET.SubElement(so, "{http://admarkt.marktplaats.nl/schemas/1.0}type").text = opt.get("type", "").strip()
             if "cost" in opt:
-                ET.SubElement(so, "cost").text = str(opt["cost"])
+                ET.SubElement(so, "{http://admarkt.marktplaats.nl/schemas/1.0}cost").text = str(opt["cost"])
             if "description" in opt and opt["description"]:
-                ET.SubElement(so, "description").text = opt["description"]
+                ET.SubElement(so, "{http://admarkt.marktplaats.nl/schemas/1.0}description").text = cdata(opt["description"])
 
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
-
 
 def generate_feed_response():
     try:
@@ -154,21 +122,17 @@ def generate_feed_response():
     except Exception as e:
         return Response(f"<error>Unexpected error: {e}</error>", status=500, mimetype="application/xml")
 
-
 @app.route("/feed", methods=["GET", "HEAD"])
 def feed():
     return generate_feed_response()
-
 
 @app.route("/feed.xml", methods=["GET", "HEAD"])
 def feed_xml():
     return generate_feed_response()
 
-
 @app.route("/", methods=["GET"])
 def home():
     return "Service is live. Gebruik /feed of /feed.xml voor de Marktplaats-feed."
-
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
