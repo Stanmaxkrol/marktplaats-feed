@@ -5,44 +5,37 @@ import os
 
 app = Flask(__name__)
 
-# Config (pas aan naar wens)
+# Config
 GOOGLE_FEED_URL = "https://aquariumhuis-friesland.webnode.nl/rss/pf-google_eur.xml"
 VERKOPER_NAAM = "Aquariumhuis Friesland"
 CATEGORIE_ID = "396"
 PRIJS_TYPE = "VASTE_PRIJS"
-KENMERK_VOORWAARDE = "Nieuw"
+CONDITIE = "Nieuw"
+PLAATS = "Leeuwarden"
+POSTCODE = "8921SR"
 VERZENDOPTIES = [
-    {"type": "OPHALEN", "postcode": "8921SR"},
+    {"type": "OPHALEN", "postcode": POSTCODE},
     {"type": "VERZENDEN", "kosten": "0", "omschrijving": "Gratis vanaf €49,-"},
 ]
 
-# Nettere namespace mapping voor Google feeds
 NS = {"g": "http://base.google.com/ns/1.0"}
 
-# Optioneel: eenvoudige health-check voor deploy platformen
-@app.route("/api/health", methods=["GET"])
+@app.route("/api/health")
 def health():
     return jsonify({"status": "ok"}), 200
 
 
 def fetch_google_feed():
-    """Haalt de Google Merchant feed op en retourneert XML root."""
-    headers = {
-        "User-Agent": "Aquariumhuis Friesland Feed/1.0 (+Marktplaats adapter)"
-    }
+    headers = {"User-Agent": "Aquariumhuis Friesland Feed/1.0"}
     resp = requests.get(GOOGLE_FEED_URL, headers=headers, timeout=15)
     resp.raise_for_status()
     return ET.fromstring(resp.content)
 
 
 def create_marktplaats_feed(google_root):
-    """Zet Google Merchant XML om naar Marktplaats XML."""
     mp_root = ET.Element("ads")
-
-    # Ondersteun zowel <item> als <channel>/<item>
     items = google_root.findall(".//item")
     if not items:
-        # Sommige feeds gebruiken <channel><item>
         channel = google_root.find(".//channel")
         if channel is not None:
             items = channel.findall(".//item")
@@ -62,13 +55,16 @@ def create_marktplaats_feed(google_root):
         ET.SubElement(ad, "categorie-id").text = CATEGORIE_ID
         ET.SubElement(ad, "prijs-type").text = PRIJS_TYPE
 
+        # Locatiegegevens
+        ET.SubElement(ad, "plaats").text = PLAATS
+        ET.SubElement(ad, "postcode").text = POSTCODE
+
         # Prijs (in centen)
         prijs_raw = (
             item.findtext("g:price", default="", namespaces=NS)
             or item.findtext("price", default="")
         ).strip()
         if prijs_raw:
-            # Voorbeelden: "12.95 EUR" of "12,95 EUR"
             waarde = prijs_raw.replace(" EUR", "").replace(",", ".").strip()
             try:
                 prijs_cent = int(round(float(waarde) * 100))
@@ -78,7 +74,6 @@ def create_marktplaats_feed(google_root):
 
         # URL en media
         ET.SubElement(ad, "url").text = item.findtext("link", default="").strip()
-
         image = (
             item.findtext("g:image_link", default="", namespaces=NS)
             or item.findtext("image_link", default="")
@@ -87,9 +82,9 @@ def create_marktplaats_feed(google_root):
             media = ET.SubElement(ad, "media")
             ET.SubElement(media, "url").text = image
 
-        # Kenmerken
+        # Kenmerken (Conditie)
         kenmerken = ET.SubElement(ad, "kenmerken")
-        ET.SubElement(kenmerken, "kenmerk", naam="Voorwaarde").text = KENMERK_VOORWAARDE
+        ET.SubElement(kenmerken, "kenmerk", naam="Conditie").text = CONDITIE
 
         # Verzendopties
         verzendopties = ET.SubElement(ad, "verzendopties")
@@ -103,31 +98,28 @@ def create_marktplaats_feed(google_root):
             if "omschrijving" in optie:
                 ET.SubElement(o, "omschrijving").text = optie["omschrijving"]
 
-    # Maak nette XML output met declaratie
     return ET.tostring(mp_root, encoding="utf-8", xml_declaration=True)
 
 
 @app.route("/feed", methods=["GET", "HEAD"])
 def serve_feed():
-    """Serveert de Marktplaats-feed via /feed"""
     try:
         google_root = fetch_google_feed()
         mp_xml = create_marktplaats_feed(google_root)
-        # Gebruik application/xml en expliciete charset
         return Response(mp_xml, mimetype="application/xml; charset=utf-8")
-    except requests.HTTPError as e:
-        return Response(f"<error>Upstream feed HTTP error: {e}</error>", status=502, mimetype="application/xml")
-    except requests.RequestException as e:
-        return Response(f"<error>Upstream feed request error: {e}</error>", status=504, mimetype="application/xml")
-    except ET.ParseError as e:
-        return Response(f"<error>Upstream feed parse error: {e}</error>", status=502, mimetype="application/xml")
     except Exception as e:
-        return Response(f"<error>Unexpected error: {e}</error>", status=500, mimetype="application/xml")
+        return Response(f"<error>{e}</error>", status=500, mimetype="application/xml")
 
 
-@app.route("/", methods=["GET"])
+# Extra route zodat ook /feed.xml werkt
+@app.route("/feed.xml", methods=["GET", "HEAD"])
+def serve_feed_xml():
+    return serve_feed()
+
+
+@app.route("/")
 def home():
-    return "Service is live. Gebruik /feed voor de Marktplaats-feed."
+    return "Service is live. Gebruik /feed of /feed.xml voor de Marktplaats-feed."
 
 
 if __name__ == "__main__":
