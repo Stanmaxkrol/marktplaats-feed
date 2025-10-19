@@ -13,6 +13,9 @@ CITY = "Leeuwarden"
 ZIPCODE = "8921SR"
 VENDOR_ID = "55743253"
 
+PHONE_NUMBER = "+31582124300"
+EMAIL_ADVERTISER = "true"
+
 NS = {"g": "http://base.google.com/ns/1.0"}
 
 @app.route("/api/health", methods=["GET"])
@@ -107,6 +110,10 @@ def create_marktplaats_feed(google_root):
         pickup = ET.SubElement(shipping_el2, "{http://admarkt.marktplaats.nl/schemas/1.0}shippingOption")
         ET.SubElement(pickup, "{http://admarkt.marktplaats.nl/schemas/1.0}shippingType").text = "PICKUP"
         ET.SubElement(pickup, "{http://admarkt.marktplaats.nl/schemas/1.0}location").text = ZIPCODE
+
+        # Contactgegevens BUITEN shippingOptions
+        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}phoneNumber").text = PHONE_NUMBER
+        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}emailAdvertiser").text = EMAIL_ADVERTISER
 
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
