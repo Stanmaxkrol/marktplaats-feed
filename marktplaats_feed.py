@@ -7,33 +7,81 @@ app = Flask(__name__)
 
 # Config
 GOOGLE_FEED_URL = "https://aquariumhuis-friesland.webnode.nl/rss/pf-google_eur.xml"
-VERKOPER_NAAM = "Aquariumhuis Friesland"
-CATEGORIE_ID = "396"
-PRIJS_TYPE = "VASTE_PRIJS"
-CONDITIE = "Nieuw"
-PLAATS = "Leeuwarden"
-POSTCODE = "8921SR"
-VERZENDOPTIES = [
-    {"type": "OPHALEN", "postcode": POSTCODE},
-    {"type": "VERZENDEN", "kosten": "0", "omschrijving": "Gratis vanaf €49,-"},
+CATEGORY_ID = "396"           # Marktplaats categoryId
+CONDITION = "NEW"             # Toegestane waarden: NEW, USED, REFURBISHED (afhankelijk van XSD)
+CITY = "Leeuwarden"
+ZIPCODE = "8921SR"
+SHIPPING_OPTIONS = [
+    {"type": "PICKUP"},  # Ophalen
+    {"type": "DELIVERY", "cost": "0", "description": "Gratis vanaf €49,-"},
 ]
 
 NS = {"g": "http://base.google.com/ns/1.0"}
 
-@app.route("/api/health")
+
+@app.route("/api/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok"}), 200
 
 
 def fetch_google_feed():
-    headers = {"User-Agent": "Aquariumhuis Friesland Feed/1.0"}
-    resp = requests.get(GOOGLE_FEED_URL, headers=headers, timeout=15)
+    headers = {"User-Agent": "Marktplaats Feed Adapter/1.0"}
+    resp = requests.get(GOOGLE_FEED_URL, headers=headers, timeout=20)
     resp.raise_for_status()
     return ET.fromstring(resp.content)
 
 
+def parse_price_eur(item):
+    """Return price in euros as string, e.g. '12.95' (no currency suffix)."""
+    raw = (item.findtext("g:price", default="", namespaces=NS) or item.findtext("price", default="")).strip()
+    if not raw:
+        return None
+    # Examples: "12.95 EUR", "12,95 EUR", "12.95"
+    value = raw.replace("EUR", "").strip()
+    value = value.replace(",", ".")
+    try:
+        # Keep two decimals as text
+        num = float(value)
+        return f"{num:.2f}"
+    except ValueError:
+        return None
+
+
 def create_marktplaats_feed(google_root):
-    mp_root = ET.Element("ads")
+    """
+    Bouw XSD-conforme feed:
+    <ads>
+      <ad>
+        <externalId>...</externalId>
+        <title>...</title>
+        <description>...</description>
+        <categoryId>396</categoryId>
+        <price currency="EUR">12.95</price>
+        <location>
+          <zipcode>8921SR</zipcode>
+          <city>Leeuwarden</city>
+        </location>
+        <condition>NEW</condition>
+        <url>https://...</url>
+        <images>
+          <image url="https://..."/>
+        </images>
+        <shippingOptions>
+          <shippingOption>
+            <type>PICKUP</type>
+          </shippingOption>
+          <shippingOption>
+            <type>DELIVERY</type>
+            <cost>0</cost>
+            <description>Gratis vanaf €49,-</description>
+          </shippingOption>
+        </shippingOptions>
+      </ad>
+    </ads>
+    """
+    root = ET.Element("ads")
+
+    # Ondersteun <rss><channel><item> alsook los <item>
     items = google_root.findall(".//item")
     if not items:
         channel = google_root.find(".//channel")
@@ -41,83 +89,83 @@ def create_marktplaats_feed(google_root):
             items = channel.findall(".//item")
 
     for item in items:
-        ad = ET.SubElement(mp_root, "ad")
+        ad = ET.SubElement(root, "ad")
 
-        # Basisvelden
-        leverancier_id = (
-            item.findtext("g:id", default="", namespaces=NS)
-            or item.findtext("id", default="")
-        )
-        ET.SubElement(ad, "leveranciers-id").text = leverancier_id
-        ET.SubElement(ad, "verkopersnaam").text = VERKOPER_NAAM
-        ET.SubElement(ad, "titel").text = item.findtext("title", default="").strip()
-        ET.SubElement(ad, "beschrijving").text = item.findtext("description", default="").strip()
-        ET.SubElement(ad, "categorie-id").text = CATEGORIE_ID
-        ET.SubElement(ad, "prijs-type").text = PRIJS_TYPE
+        # IDs & basis
+        external_id = item.findtext("g:id", default="", namespaces=NS) or item.findtext("id", default="")
+        ET.SubElement(ad, "externalId").text = external_id.strip()
 
-        # Locatiegegevens
-        ET.SubElement(ad, "plaats").text = PLAATS
-        ET.SubElement(ad, "postcode").text = POSTCODE
+        title = item.findtext("title", default="").strip()
+        ET.SubElement(ad, "title").text = title
 
-        # Prijs (in centen)
-        prijs_raw = (
-            item.findtext("g:price", default="", namespaces=NS)
-            or item.findtext("price", default="")
-        ).strip()
-        if prijs_raw:
-            waarde = prijs_raw.replace(" EUR", "").replace(",", ".").strip()
-            try:
-                prijs_cent = int(round(float(waarde) * 100))
-                ET.SubElement(ad, "prijs").text = str(prijs_cent)
-            except ValueError:
-                pass
+        description = item.findtext("description", default="").strip()
+        ET.SubElement(ad, "description").text = description
 
-        # URL en media
-        ET.SubElement(ad, "url").text = item.findtext("link", default="").strip()
-        image = (
-            item.findtext("g:image_link", default="", namespaces=NS)
-            or item.findtext("image_link", default="")
-        ).strip()
-        if image:
-            media = ET.SubElement(ad, "media")
-            ET.SubElement(media, "url").text = image
+        ET.SubElement(ad, "categoryId").text = CATEGORY_ID
 
-        # Kenmerken (Conditie)
-        kenmerken = ET.SubElement(ad, "kenmerken")
-        ET.SubElement(kenmerken, "kenmerk", naam="Conditie").text = CONDITIE
+        # Prijs (EUR met attribuut currency)
+        price_eur = parse_price_eur(item)
+        if price_eur:
+            price_el = ET.SubElement(ad, "price", currency="EUR")
+            price_el.text = price_eur
 
-        # Verzendopties
-        verzendopties = ET.SubElement(ad, "verzendopties")
-        for optie in VERZENDOPTIES:
-            o = ET.SubElement(verzendopties, "verzendoptie")
-            ET.SubElement(o, "type").text = optie.get("type", "")
-            if "postcode" in optie:
-                ET.SubElement(o, "postcode").text = optie["postcode"]
-            if "kosten" in optie:
-                ET.SubElement(o, "kosten").text = optie["kosten"]
-            if "omschrijving" in optie:
-                ET.SubElement(o, "omschrijving").text = optie["omschrijving"]
+        # Locatie
+        loc = ET.SubElement(ad, "location")
+        ET.SubElement(loc, "zipcode").text = ZIPCODE
+        ET.SubElement(loc, "city").text = CITY
 
-    return ET.tostring(mp_root, encoding="utf-8", xml_declaration=True)
+        # Conditie
+        ET.SubElement(ad, "condition").text = CONDITION
+
+        # URL (product link)
+        product_url = item.findtext("link", default="").strip()
+        ET.SubElement(ad, "url").text = product_url
+
+        # Afbeeldingen (één of meer)
+        images_el = ET.SubElement(ad, "images")
+        image_url = (item.findtext("g:image_link", default="", namespaces=NS) or item.findtext("image_link", default="")).strip()
+        if image_url:
+            ET.SubElement(images_el, "image", url=image_url)
+
+        # Verzendopties (PICKUP/DELIVERY)
+        shipping_el = ET.SubElement(ad, "shippingOptions")
+        for opt in SHIPPING_OPTIONS:
+            so = ET.SubElement(shipping_el, "shippingOption")
+            ET.SubElement(so, "type").text = opt.get("type", "").strip()
+            if "cost" in opt:
+                ET.SubElement(so, "cost").text = str(opt["cost"])
+            if "description" in opt and opt["description"]:
+                ET.SubElement(so, "description").text = opt["description"]
+
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
-@app.route("/feed", methods=["GET", "HEAD"])
-def serve_feed():
+def generate_feed_response():
     try:
         google_root = fetch_google_feed()
         mp_xml = create_marktplaats_feed(google_root)
         return Response(mp_xml, mimetype="application/xml; charset=utf-8")
+    except requests.HTTPError as e:
+        return Response(f"<error>Upstream HTTP error: {e}</error>", status=502, mimetype="application/xml")
+    except requests.RequestException as e:
+        return Response(f"<error>Upstream request error: {e}</error>", status=504, mimetype="application/xml")
+    except ET.ParseError as e:
+        return Response(f"<error>Upstream parse error: {e}</error>", status=502, mimetype="application/xml")
     except Exception as e:
-        return Response(f"<error>{e}</error>", status=500, mimetype="application/xml")
+        return Response(f"<error>Unexpected error: {e}</error>", status=500, mimetype="application/xml")
 
 
-# Extra route zodat ook /feed.xml werkt
+@app.route("/feed", methods=["GET", "HEAD"])
+def feed():
+    return generate_feed_response()
+
+
 @app.route("/feed.xml", methods=["GET", "HEAD"])
-def serve_feed_xml():
-    return serve_feed()
+def feed_xml():
+    return generate_feed_response()
 
 
-@app.route("/")
+@app.route("/", methods=["GET"])
 def home():
     return "Service is live. Gebruik /feed of /feed.xml voor de Marktplaats-feed."
 
