@@ -73,9 +73,10 @@ def create_marktplaats_feed(google_root):
         # Category
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}categoryId").text = CATEGORY_ID
 
-        # Price in centen
+        # PriceType en Price in centen
         price_cents = parse_price_cents(item)
         if price_cents:
+            ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}priceType").text = "FIXED_PRICE"
             price_el = ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}price", currency="EUR")
             price_el.text = price_cents
 
