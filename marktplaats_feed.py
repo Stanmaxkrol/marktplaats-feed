@@ -9,7 +9,6 @@ app = Flask(__name__)
 GOOGLE_FEED_URL = "https://aquariumhuis-friesland.webnode.nl/rss/pf-google_eur.xml"
 CATEGORY_ID = "396"           # Marktplaats categoryId
 CONDITION = "NEW"             # Toegestane waarden: NEW, USED, REFURBISHED
-CITY = "Leeuwarden"
 ZIPCODE = "8921SR"
 VENDOR_ID = "55743253"
 
@@ -78,11 +77,6 @@ def create_marktplaats_feed(google_root):
             ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}priceType").text = "FIXED_PRICE"
             price_el = ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}price")
             price_el.text = price_cents
-
-        # Location
-        loc = ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}location")
-        ET.SubElement(loc, "{http://admarkt.marktplaats.nl/schemas/1.0}zipcode").text = ZIPCODE
-        ET.SubElement(loc, "{http://admarkt.marktplaats.nl/schemas/1.0}city").text = CITY
 
         # Condition
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}condition").text = CONDITION
