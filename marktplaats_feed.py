@@ -29,8 +29,8 @@ def fetch_google_feed():
     return ET.fromstring(resp.content)
 
 def parse_price_cents(item):
-    """Parse prijs uit Google feed en zet om naar centen (integer string)."""
-    raw = (item.findtext("g:price", default="", namespaces=NS) or item.findtext("price", default="")).strip()
+    raw = (item.findtext("g:price", default="", namespaces=NS) or
+           item.findtext("price", default="")).strip()
     if not raw:
         return None
     value = raw.replace("EUR", "").strip().replace(",", ".")
@@ -55,68 +55,63 @@ def create_marktplaats_feed(google_root):
     for item in items:
         ad = ET.SubElement(root, "{http://admarkt.marktplaats.nl/schemas/1.0}ad")
 
-        # Vendor ID (verplicht)
+        # Volgorde conform XSD / voorbeeld
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}vendorId").text = VENDOR_ID
 
-        # Seller name
-        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}sellerName").text = SELLER_NAME
-
-        # Title & Description met CDATA
         title = item.findtext("title", default="").strip()
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}title").text = cdata(title)
 
         description = item.findtext("description", default="").strip()
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}description").text = cdata(description)
 
-        # Category
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}categoryId").text = CATEGORY_ID
 
-        # PriceType en Price in centen
-        price_cents = parse_price_cents(item)
-        if price_cents:
-            ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}priceType").text = "FIXED_PRICE"
-            price_el = ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}price")
-            price_el.text = price_cents
-
-        # Condition
-        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}condition").text = CONDITION
-
-        # Product URL
         product_url = item.findtext("link", default="").strip()
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}url").text = product_url
-
-        # Vanity URL (zelfde als product_url)
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}vanityUrl").text = product_url
 
-        # Media (images) - vervangt <images>
+        price_cents = parse_price_cents(item)
+        if price_cents:
+            ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}price").text = price_cents
+            ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}priceType").text = "FIXED_PRICE"
+
+        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}phoneNumber").text = PHONE_NUMBER
+        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}emailAdvertiser").text = EMAIL_ADVERTISER
+        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}sellerName").text = SELLER_NAME
+
+        # Status optioneel, default ACTIVE
+        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}status").text = "ACTIVE"
+
+        # Media (images)
         media_el = ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}media")
-        # Hoofdafbeelding
-        image_url = (item.findtext("g:image_link", default="", namespaces=NS) or item.findtext("image_link", default="")).strip()
+        image_url = (item.findtext("g:image_link", default="", namespaces=NS) or
+                     item.findtext("image_link", default="")).strip()
         if image_url:
             ET.SubElement(media_el, "{http://admarkt.marktplaats.nl/schemas/1.0}image", url=image_url)
-        # Extra afbeeldingen uit Google feed (optioneel)
         for add_img in item.findall("g:additional_image_link", namespaces=NS):
             url = (add_img.text or "").strip()
             if url:
                 ET.SubElement(media_el, "{http://admarkt.marktplaats.nl/schemas/1.0}image", url=url)
 
-        # Shipping options (één container met meerdere opties)
+        # Budget optioneel, leeg laten
+        budget_el = ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}budget")
+        ET.SubElement(budget_el, "{http://admarkt.marktplaats.nl/schemas/1.0}cpc")
+        ET.SubElement(budget_el, "{http://admarkt.marktplaats.nl/schemas/1.0}autobid").text = "false"
+
+        # Shipping options
         shipping_el = ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}shippingOptions")
 
-        # SHIP
         ship = ET.SubElement(shipping_el, "{http://admarkt.marktplaats.nl/schemas/1.0}shippingOption")
         ET.SubElement(ship, "{http://admarkt.marktplaats.nl/schemas/1.0}shippingType").text = "SHIP"
         ET.SubElement(ship, "{http://admarkt.marktplaats.nl/schemas/1.0}cost").text = "695"
         ET.SubElement(ship, "{http://admarkt.marktplaats.nl/schemas/1.0}time").text = "2d-5d"
 
-        # PICKUP
         pickup = ET.SubElement(shipping_el, "{http://admarkt.marktplaats.nl/schemas/1.0}shippingOption")
         ET.SubElement(pickup, "{http://admarkt.marktplaats.nl/schemas/1.0}shippingType").text = "PICKUP"
         ET.SubElement(pickup, "{http://admarkt.marktplaats.nl/schemas/1.0}location").text = ZIPCODE
 
-        # Contactgegevens BUITEN shippingOptions
-        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}phoneNumber").text = PHONE_NUMBER
-        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}emailAdvertiser").text = EMAIL_ADVERTISER
+        # Condition
+        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}condition").text = CONDITION
 
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
