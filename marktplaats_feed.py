@@ -88,23 +88,29 @@ def create_marktplaats_feed(google_root):
         # Vanity URL (zelfde als product_url)
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}vanityUrl").text = product_url
 
-        # Images
-        images_el = ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}images")
+        # Media (images) - vervangt <images>
+        media_el = ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}media")
+        # Hoofdafbeelding
         image_url = (item.findtext("g:image_link", default="", namespaces=NS) or item.findtext("image_link", default="")).strip()
         if image_url:
-            ET.SubElement(images_el, "{http://admarkt.marktplaats.nl/schemas/1.0}image", url=image_url)
+            ET.SubElement(media_el, "{http://admarkt.marktplaats.nl/schemas/1.0}image", url=image_url)
+        # Extra afbeeldingen uit Google feed (optioneel)
+        for add_img in item.findall("g:additional_image_link", namespaces=NS):
+            url = (add_img.text or "").strip()
+            if url:
+                ET.SubElement(media_el, "{http://admarkt.marktplaats.nl/schemas/1.0}image", url=url)
 
-        # Shipping options (exacte structuur zoals voorbeeld)
+        # Shipping options (één container met meerdere opties)
+        shipping_el = ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}shippingOptions")
+
         # SHIP
-        shipping_el1 = ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}shippingOptions")
-        ship = ET.SubElement(shipping_el1, "{http://admarkt.marktplaats.nl/schemas/1.0}shippingOption")
+        ship = ET.SubElement(shipping_el, "{http://admarkt.marktplaats.nl/schemas/1.0}shippingOption")
         ET.SubElement(ship, "{http://admarkt.marktplaats.nl/schemas/1.0}shippingType").text = "SHIP"
         ET.SubElement(ship, "{http://admarkt.marktplaats.nl/schemas/1.0}cost").text = "695"
         ET.SubElement(ship, "{http://admarkt.marktplaats.nl/schemas/1.0}time").text = "2d-5d"
 
         # PICKUP
-        shipping_el2 = ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}shippingOptions")
-        pickup = ET.SubElement(shipping_el2, "{http://admarkt.marktplaats.nl/schemas/1.0}shippingOption")
+        pickup = ET.SubElement(shipping_el, "{http://admarkt.marktplaats.nl/schemas/1.0}shippingOption")
         ET.SubElement(pickup, "{http://admarkt.marktplaats.nl/schemas/1.0}shippingType").text = "PICKUP"
         ET.SubElement(pickup, "{http://admarkt.marktplaats.nl/schemas/1.0}location").text = ZIPCODE
 
