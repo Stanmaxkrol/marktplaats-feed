@@ -10,7 +10,6 @@ GOOGLE_FEED_URL = "https://aquariumhuis-friesland.webnode.nl/rss/pf-google_eur.x
 CATEGORY_ID = "396"           # Marktplaats categoryId
 CONDITION = "NEW"             # Toegestane waarden: NEW, USED, REFURBISHED
 ZIPCODE = "8921SR"
-VENDOR_ID = "55743253"
 
 PHONE_NUMBER = "+31582124300"
 EMAIL_ADVERTISER = "true"
@@ -55,31 +54,41 @@ def create_marktplaats_feed(google_root):
     for item in items:
         ad = ET.SubElement(root, "{http://admarkt.marktplaats.nl/schemas/1.0}ad")
 
-        # Volgorde conform XSD / voorbeeld
-        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}vendorId").text = VENDOR_ID
+        # Vendor ID: eerst g:id, dan g:gtin, anders fallback
+        vendor_id = item.findtext("g:id", default="", namespaces=NS).strip()
+        if not vendor_id:
+            vendor_id = item.findtext("g:gtin", default="", namespaces=NS).strip()
+        if not vendor_id:
+            vendor_id = item.findtext("link", default="").strip()  # laatste fallback
+        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}vendorId").text = vendor_id
 
+        # Title & Description
         title = item.findtext("title", default="").strip()
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}title").text = cdata(title)
 
         description = item.findtext("description", default="").strip()
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}description").text = cdata(description)
 
+        # Category
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}categoryId").text = CATEGORY_ID
 
+        # URL & Vanity URL
         product_url = item.findtext("link", default="").strip()
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}url").text = product_url
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}vanityUrl").text = product_url
 
+        # Price & PriceType
         price_cents = parse_price_cents(item)
         if price_cents:
             ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}price").text = price_cents
             ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}priceType").text = "FIXED_PRICE"
 
+        # Contactgegevens
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}phoneNumber").text = PHONE_NUMBER
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}emailAdvertiser").text = EMAIL_ADVERTISER
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}sellerName").text = SELLER_NAME
 
-        # Status optioneel, default ACTIVE
+        # Status
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}status").text = "ACTIVE"
 
         # Media (images)
@@ -93,10 +102,10 @@ def create_marktplaats_feed(google_root):
             if url:
                 ET.SubElement(media_el, "{http://admarkt.marktplaats.nl/schemas/1.0}image", url=url)
 
-        # Budget optioneel, leeg laten
+        # Budget (autobid altijd true)
         budget_el = ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}budget")
         ET.SubElement(budget_el, "{http://admarkt.marktplaats.nl/schemas/1.0}cpc")
-        ET.SubElement(budget_el, "{http://admarkt.marktplaats.nl/schemas/1.0}autobid").text = "false"
+        ET.SubElement(budget_el, "{http://admarkt.marktplaats.nl/schemas/1.0}autobid").text = "true"
 
         # Shipping options
         shipping_el = ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}shippingOptions")
