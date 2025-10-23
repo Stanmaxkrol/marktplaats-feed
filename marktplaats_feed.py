@@ -8,7 +8,7 @@ app = Flask(__name__)
 # Config
 GOOGLE_FEED_URL = "https://aquariumhuis-friesland.webnode.nl/rss/pf-google_eur.xml"
 CATEGORY_ID = "396"           # Marktplaats categoryId
-CONDITION = "NEW"             # Toegestane waarden: NEW, USED, REFURBISHED
+CONDITION = "new"             # Toegestane waarden: new, used, refurbished
 ZIPCODE = "8921SR"
 
 PHONE_NUMBER = "+31582124300"
@@ -153,3 +153,4 @@ def home():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
