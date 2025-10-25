@@ -23,13 +23,11 @@ NS = {"g": "http://base.google.com/ns/1.0"}
 def health():
     return jsonify({"status": "ok"}), 200
 
-
 def fetch_google_feed():
     headers = {"User-Agent": "Marktplaats Feed Adapter/1.0"}
     resp = requests.get(GOOGLE_FEED_URL, headers=headers, timeout=20)
     resp.raise_for_status()
     return ET.fromstring(resp.content)
-
 
 def parse_price_cents(item):
     raw = (item.findtext("g:price", default="", namespaces=NS) or
@@ -42,20 +40,17 @@ def parse_price_cents(item):
     except ValueError:
         return None
 
-
 def clean_text(text, max_length=None):
-    """Verwijder HTML, decodeer entities en geef platte tekst terug."""
     if not text:
         return ""
     text = text.strip()
-    text = re.sub(r"<[^>]+>", "", text)               # verwijder HTML-tags
-    text = html.unescape(html.unescape(text))         # decodeer dubbele entities
+    text = re.sub(r"<[^>]+>", "", text)
+    text = html.unescape(html.unescape(text))
     text = text.replace("\xa0", " ").replace("&nbsp;", " ")
-    text = re.sub(r"\s+", " ", text)                  # normaliseer witruimte
+    text = re.sub(r"\s+", " ", text)
     if max_length:
         text = text[:max_length]
     return text
-
 
 def create_marktplaats_feed(google_root):
     ET.register_namespace('admarkt', 'http://admarkt.marktplaats.nl/schemas/1.0')
@@ -121,8 +116,9 @@ def create_marktplaats_feed(google_root):
             if url:
                 ET.SubElement(media_el, "{http://admarkt.marktplaats.nl/schemas/1.0}image", url=url)
 
-        # Budget – alleen autobid = true
+        # Budget – verplicht cpc element + autobid = true
         budget_el = ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}budget")
+        ET.SubElement(budget_el, "{http://admarkt.marktplaats.nl/schemas/1.0}cpc")  # leeg element, schema vereist
         ET.SubElement(budget_el, "{http://admarkt.marktplaats.nl/schemas/1.0}autobid").text = "true"
 
         # Verzendopties
@@ -142,7 +138,6 @@ def create_marktplaats_feed(google_root):
 
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
-
 def generate_feed_response():
     try:
         google_root = fetch_google_feed()
@@ -157,21 +152,17 @@ def generate_feed_response():
     except Exception as e:
         return Response(f"<error>Unexpected error: {e}</error>", status=500, mimetype="application/xml")
 
-
 @app.route("/feed", methods=["GET", "HEAD"])
 def feed():
     return generate_feed_response()
-
 
 @app.route("/feed.xml", methods=["GET", "HEAD"])
 def feed_xml():
     return generate_feed_response()
 
-
 @app.route("/", methods=["GET"])
 def home():
     return "Service is live. Gebruik /feed of /feed.xml voor de Marktplaats-feed."
-
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
