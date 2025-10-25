@@ -43,6 +43,20 @@ def parse_price_cents(item):
         return None
 
 
+def clean_text(text, max_length=None):
+    """Verwijder HTML, decodeer entities en geef platte tekst terug."""
+    if not text:
+        return ""
+    text = text.strip()
+    text = re.sub(r"<[^>]+>", "", text)               # verwijder HTML-tags
+    text = html.unescape(html.unescape(text))         # decodeer dubbele entities
+    text = text.replace("\xa0", " ").replace("&nbsp;", " ")
+    text = re.sub(r"\s+", " ", text)                  # normaliseer witruimte
+    if max_length:
+        text = text[:max_length]
+    return text
+
+
 def create_marktplaats_feed(google_root):
     ET.register_namespace('admarkt', 'http://admarkt.marktplaats.nl/schemas/1.0')
     root = ET.Element("{http://admarkt.marktplaats.nl/schemas/1.0}ads")
@@ -64,17 +78,14 @@ def create_marktplaats_feed(google_root):
             vendor_id = item.findtext("link", default="").strip()
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}vendorId").text = vendor_id
 
-        # Titel – max 60 karakters
-        title = item.findtext("title", default="").strip()
+        # Titel – platte tekst, max 60 karakters
+        title = clean_text(item.findtext("title", default=""), max_length=60)
         if len(title) > 60:
             title = title[:57] + "..."
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}title").text = title
 
-        # Beschrijving – HTML verwijderen, entities decoderen, max 4000 tekens
-        desc = item.findtext("description", default="").strip()
-        desc = re.sub(r"<[^>]+>", "", desc)
-        desc = html.unescape(desc)
-        desc = desc[:4000]
+        # Beschrijving – platte tekst, max 4000 tekens
+        desc = clean_text(item.findtext("description", default=""), max_length=4000)
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}description").text = desc
 
         # Categorie
@@ -110,7 +121,7 @@ def create_marktplaats_feed(google_root):
             if url:
                 ET.SubElement(media_el, "{http://admarkt.marktplaats.nl/schemas/1.0}image", url=url)
 
-        # Budget (alleen autobid)
+        # Budget – alleen autobid = true
         budget_el = ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}budget")
         ET.SubElement(budget_el, "{http://admarkt.marktplaats.nl/schemas/1.0}autobid").text = "true"
 
