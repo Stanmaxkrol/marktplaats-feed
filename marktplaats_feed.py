@@ -2,6 +2,8 @@ from flask import Flask, Response, jsonify
 import requests
 import xml.etree.ElementTree as ET
 import os
+import re
+import html
 
 app = Flask(__name__)
 
@@ -21,11 +23,13 @@ NS = {"g": "http://base.google.com/ns/1.0"}
 def health():
     return jsonify({"status": "ok"}), 200
 
+
 def fetch_google_feed():
     headers = {"User-Agent": "Marktplaats Feed Adapter/1.0"}
     resp = requests.get(GOOGLE_FEED_URL, headers=headers, timeout=20)
     resp.raise_for_status()
     return ET.fromstring(resp.content)
+
 
 def parse_price_cents(item):
     raw = (item.findtext("g:price", default="", namespaces=NS) or
@@ -38,8 +42,6 @@ def parse_price_cents(item):
     except ValueError:
         return None
 
-def cdata(text):
-    return f"<![CDATA[{text}]]>"
 
 def create_marktplaats_feed(google_root):
     ET.register_namespace('admarkt', 'http://admarkt.marktplaats.nl/schemas/1.0')
@@ -54,22 +56,28 @@ def create_marktplaats_feed(google_root):
     for item in items:
         ad = ET.SubElement(root, "{http://admarkt.marktplaats.nl/schemas/1.0}ad")
 
-        # Vendor ID: eerst g:id, dan g:gtin, anders fallback
+        # Vendor ID
         vendor_id = item.findtext("g:id", default="", namespaces=NS).strip()
         if not vendor_id:
             vendor_id = item.findtext("g:gtin", default="", namespaces=NS).strip()
         if not vendor_id:
-            vendor_id = item.findtext("link", default="").strip()  # laatste fallback
+            vendor_id = item.findtext("link", default="").strip()
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}vendorId").text = vendor_id
 
-        # Title & Description
+        # Titel – max 60 karakters
         title = item.findtext("title", default="").strip()
-        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}title").text = cdata(title)
+        if len(title) > 60:
+            title = title[:57] + "..."
+        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}title").text = title
 
-        description = item.findtext("description", default="").strip()
-        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}description").text = cdata(description)
+        # Beschrijving – HTML verwijderen, entities decoderen, max 4000 tekens
+        desc = item.findtext("description", default="").strip()
+        desc = re.sub(r"<[^>]+>", "", desc)
+        desc = html.unescape(desc)
+        desc = desc[:4000]
+        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}description").text = desc
 
-        # Category
+        # Categorie
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}categoryId").text = CATEGORY_ID
 
         # URL & Vanity URL
@@ -77,7 +85,7 @@ def create_marktplaats_feed(google_root):
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}url").text = product_url
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}vanityUrl").text = product_url
 
-        # Price & PriceType
+        # Prijs
         price_cents = parse_price_cents(item)
         if price_cents:
             ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}price").text = price_cents
@@ -91,7 +99,7 @@ def create_marktplaats_feed(google_root):
         # Status
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}status").text = "ACTIVE"
 
-        # Media (images)
+        # Media (afbeeldingen)
         media_el = ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}media")
         image_url = (item.findtext("g:image_link", default="", namespaces=NS) or
                      item.findtext("image_link", default="")).strip()
@@ -102,12 +110,11 @@ def create_marktplaats_feed(google_root):
             if url:
                 ET.SubElement(media_el, "{http://admarkt.marktplaats.nl/schemas/1.0}image", url=url)
 
-        # Budget (autobid altijd true)
+        # Budget (alleen autobid)
         budget_el = ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}budget")
-        ET.SubElement(budget_el, "{http://admarkt.marktplaats.nl/schemas/1.0}cpc")
         ET.SubElement(budget_el, "{http://admarkt.marktplaats.nl/schemas/1.0}autobid").text = "true"
 
-        # Shipping options
+        # Verzendopties
         shipping_el = ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}shippingOptions")
 
         ship = ET.SubElement(shipping_el, "{http://admarkt.marktplaats.nl/schemas/1.0}shippingOption")
@@ -119,10 +126,11 @@ def create_marktplaats_feed(google_root):
         ET.SubElement(pickup, "{http://admarkt.marktplaats.nl/schemas/1.0}shippingType").text = "PICKUP"
         ET.SubElement(pickup, "{http://admarkt.marktplaats.nl/schemas/1.0}location").text = ZIPCODE
 
-        # Condition
+        # Conditie
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}condition").text = CONDITION
 
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
 
 def generate_feed_response():
     try:
@@ -138,19 +146,22 @@ def generate_feed_response():
     except Exception as e:
         return Response(f"<error>Unexpected error: {e}</error>", status=500, mimetype="application/xml")
 
+
 @app.route("/feed", methods=["GET", "HEAD"])
 def feed():
     return generate_feed_response()
+
 
 @app.route("/feed.xml", methods=["GET", "HEAD"])
 def feed_xml():
     return generate_feed_response()
 
+
 @app.route("/", methods=["GET"])
 def home():
     return "Service is live. Gebruik /feed of /feed.xml voor de Marktplaats-feed."
 
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-
