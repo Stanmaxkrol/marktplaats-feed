@@ -132,7 +132,7 @@ def create_marktplaats_feed(google_root):
             
         ship = ET.SubElement(shipping_el, "{http://admarkt.marktplaats.nl/schemas/1.0}shippingOption")
         ET.SubElement(ship, "{http://admarkt.marktplaats.nl/schemas/1.0}shippingType").text = "SHIP"
-        ET.SubElement(ship, "{http://admarkt.marktplaats.nl/schemas/1.0}cost").text = "695"
+        ET.SubElement(ship, "{http://admarkt.marktplaats.nl/schemas/1.0}cost").text = current_shipping_cost
         ET.SubElement(ship, "{http://admarkt.marktplaats.nl/schemas/1.0}time").text = "2d-5d"
 
         pickup = ET.SubElement(shipping_el, "{http://admarkt.marktplaats.nl/schemas/1.0}shippingOption")
