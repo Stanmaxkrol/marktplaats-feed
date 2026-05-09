@@ -11,7 +11,6 @@ app = Flask(__name__)
 
 # Config
 GOOGLE_FEED_URL = "https://aquariumhuis-friesland.webnode.nl/rss/pf-google_eur.xml"
-# URL voor CSV-export van de spreadsheet
 SPREADSHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1LVq-LngUlgv7kAj4d03ijcajHcTv-WWNzSBu2QwJHmI/export?format=csv&gid=18228996"
 
 CATEGORY_ID = "396"
@@ -29,20 +28,21 @@ def fetch_google_feed():
     resp.raise_for_status()
     return ET.fromstring(resp.content)
 
-def fetch_spreadsheet_images():
-    """Haalt extra afbeeldingen op uit de Google Spreadsheet"""
+def fetch_spreadsheet_data():
+    """Haalt afbeeldingen, brand, gtin en mpn op uit de spreadsheet"""
     try:
         resp = requests.get(SPREADSHEET_CSV_URL, timeout=20)
         resp.raise_for_status()
         f = io.StringIO(resp.text)
         reader = csv.DictReader(f)
         
-        image_map = {}
+        product_data = {}
         for row in reader:
             item_id = row.get('id', '').strip()
             if not item_id:
                 continue
-                
+            
+            # Afbeeldingen verzamelen
             images = []
             for i in range(1, 11):
                 col_name = f'image_{i}'
@@ -50,8 +50,14 @@ def fetch_spreadsheet_images():
                 if url and url.startswith('http'):
                     images.append(url)
             
-            image_map[item_id] = images
-        return image_map
+            # Metadata verzamelen
+            product_data[item_id] = {
+                "images": images,
+                "brand": row.get('brand', '').strip(),
+                "gtin": row.get('GTIN', '').strip(),
+                "mpn": row.get('MPN', '').strip()
+            }
+        return product_data
     except Exception as e:
         print(f"Spreadsheet error: {e}")
         return {}
@@ -79,9 +85,12 @@ def clean_text(text, max_length=None):
         text = text[:max_length]
     return text
 
-def create_marktplaats_feed(google_root, spreadsheet_images):
-    ET.register_namespace('admarkt', 'http://admarkt.marktplaats.nl/schemas/1.0')
-    root = ET.Element("{http://admarkt.marktplaats.nl/schemas/1.0}ads")
+def create_marktplaats_feed(google_root, spreadsheet_data):
+    # Namespace registratie
+    ADMARKT_NS = "http://admarkt.marktplaats.nl/schemas/1.0"
+    ET.register_namespace('admarkt', ADMARKT_NS)
+    
+    root = ET.Element(f"{{{ADMARKT_NS}}}ads")
 
     items = google_root.findall(".//item")
     if not items:
@@ -90,7 +99,7 @@ def create_marktplaats_feed(google_root, spreadsheet_images):
             items = channel.findall(".//item")
 
     for item in items:
-        ad = ET.SubElement(root, "{http://admarkt.marktplaats.nl/schemas/1.0}ad")
+        ad = ET.SubElement(root, f"{{{ADMARKT_NS}}}ad")
 
         vendor_id = item.findtext("g:id", default="", namespaces=NS).strip()
         if not vendor_id:
@@ -98,81 +107,97 @@ def create_marktplaats_feed(google_root, spreadsheet_images):
         if not vendor_id:
             vendor_id = item.findtext("link", default="").strip()
         
-        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}vendorId").text = vendor_id
+        ET.SubElement(ad, f"{{{ADMARKT_NS}}}vendorId").text = vendor_id
 
+        # Titel & Beschrijving
         title = clean_text(item.findtext("title", default=""), max_length=60)
         if len(title) > 60:
             title = title[:57] + "..."
-        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}title").text = title
+        ET.SubElement(ad, f"{{{ADMARKT_NS}}}title").text = title
         
         desc = clean_text(item.findtext("description", default=""), max_length=4000)
-        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}description").text = desc
+        ET.SubElement(ad, f"{{{ADMARKT_NS}}}description").text = desc
 
-        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}categoryId").text = CATEGORY_ID
+        # Categorie & URL
+        ET.SubElement(ad, f"{{{ADMARKT_NS}}}categoryId").text = CATEGORY_ID
         product_url = item.findtext("link", default="").strip()
-        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}url").text = product_url
-        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}vanityUrl").text = product_url
+        ET.SubElement(ad, f"{{{ADMARKT_NS}}}url").text = product_url
+        ET.SubElement(ad, f"{{{ADMARKT_NS}}}vanityUrl").text = product_url
 
+        # Brand, GTIN, MPN toevoegen vanuit spreadsheet
+        extra_info = spreadsheet_data.get(vendor_id, {})
+        
+        brand = extra_info.get("brand", "")
+        if brand:
+            ET.SubElement(ad, f"{{{ADMARKT_NS}}}brand").text = brand[:70] # Max 70 tekens
+
+        gtin = extra_info.get("gtin", "")
+        if gtin:
+            ET.SubElement(ad, f"{{{ADMARKT_NS}}}gtin").text = gtin[:50] # Max 50 tekens
+
+        mpn = extra_info.get("mpn", "")
+        if mpn:
+            ET.SubElement(ad, f"{{{ADMARKT_NS}}}mpn").text = mpn[:70] # Max 70 tekens
+
+        # Prijs
         price_cents = parse_price_cents(item)
         if price_cents:
-            ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}price").text = price_cents
-            ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}priceType").text = "FIXED_PRICE"
+            ET.SubElement(ad, f"{{{ADMARKT_NS}}}price").text = price_cents
+            ET.SubElement(ad, f"{{{ADMARKT_NS}}}priceType").text = "FIXED_PRICE"
 
-        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}phoneNumber").text = PHONE_NUMBER
-        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}emailAdvertiser").text = EMAIL_ADVERTISER
-        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}sellerName").text = SELLER_NAME
-        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}status").text = "ACTIVE"
+        # Contactgegevens & Status
+        ET.SubElement(ad, f"{{{ADMARKT_NS}}}phoneNumber").text = PHONE_NUMBER
+        ET.SubElement(ad, f"{{{ADMARKT_NS}}}emailAdvertiser").text = EMAIL_ADVERTISER
+        ET.SubElement(ad, f"{{{ADMARKT_NS}}}sellerName").text = SELLER_NAME
+        ET.SubElement(ad, f"{{{ADMARKT_NS}}}status").text = "ACTIVE"
 
-        # Media sectie
-        media_el = ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}media")
-        
-        # Hoofdafbeelding
+        # Media (Afbeeldingen)
+        media_el = ET.SubElement(ad, f"{{{ADMARKT_NS}}}media")
         image_url = (item.findtext("g:image_link", default="", namespaces=NS) or
                      item.findtext("image_link", default="")).strip()
         if image_url:
-            ET.SubElement(media_el, "{http://admarkt.marktplaats.nl/schemas/1.0}image", url=image_url)
+            ET.SubElement(media_el, f"{{{ADMARKT_NS}}}image", url=image_url)
 
         # Extra afbeeldingen uit spreadsheet
-        extra_images = spreadsheet_images.get(vendor_id, [])
+        extra_images = extra_info.get("images", [])
         for extra_url in extra_images:
             if extra_url != image_url:
-                ET.SubElement(media_el, "{http://admarkt.marktplaats.nl/schemas/1.0}image", url=extra_url)
+                ET.SubElement(media_el, f"{{{ADMARKT_NS}}}image", url=extra_url)
 
         # Budget & Verzending
-        budget_el = ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}budget")
-        ET.SubElement(budget_el, "{http://admarkt.marktplaats.nl/schemas/1.0}cpc")
-        ET.SubElement(budget_el, "{http://admarkt.marktplaats.nl/schemas/1.0}autobid").text = "true"
+        budget_el = ET.SubElement(ad, f"{{{ADMARKT_NS}}}budget")
+        ET.SubElement(budget_el, f"{{{ADMARKT_NS}}}cpc")
+        ET.SubElement(budget_el, f"{{{ADMARKT_NS}}}autobid").text = "true"
 
-        shipping_el = ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}shippingOptions")
+        shipping_el = ET.SubElement(ad, f"{{{ADMARKT_NS}}}shippingOptions")
         shipping_cost = "695"
         if price_cents and int(price_cents) >= 4900:
             shipping_cost = "0"
             
-        ship = ET.SubElement(shipping_el, "{http://admarkt.marktplaats.nl/schemas/1.0}shippingOption")
-        ET.SubElement(ship, "{http://admarkt.marktplaats.nl/schemas/1.0}shippingType").text = "SHIP"
-        ET.SubElement(ship, "{http://admarkt.marktplaats.nl/schemas/1.0}cost").text = shipping_cost
-        ET.SubElement(ship, "{http://admarkt.marktplaats.nl/schemas/1.0}time").text = "2d-5d"
+        ship = ET.SubElement(shipping_el, f"{{{ADMARKT_NS}}}shippingOption")
+        ET.SubElement(ship, f"{{{ADMARKT_NS}}}shippingType").text = "SHIP"
+        ET.SubElement(ship, f"{{{ADMARKT_NS}}}cost").text = shipping_cost
+        ET.SubElement(ship, f"{{{ADMARKT_NS}}}time").text = "2d-5d"
 
-        pickup = ET.SubElement(shipping_el, "{http://admarkt.marktplaats.nl/schemas/1.0}shippingOption")
-        ET.SubElement(pickup, "{http://admarkt.marktplaats.nl/schemas/1.0}shippingType").text = "PICKUP"
-        ET.SubElement(pickup, "{http://admarkt.marktplaats.nl/schemas/1.0}location").text = ZIPCODE
+        pickup = ET.SubElement(shipping_el, f"{{{ADMARKT_NS}}}shippingOption")
+        ET.SubElement(pickup, f"{{{ADMARKT_NS}}}shippingType").text = "PICKUP"
+        ET.SubElement(pickup, f"{{{ADMARKT_NS}}}location").text = ZIPCODE
 
-        ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}condition").text = CONDITION
+        ET.SubElement(ad, f"{{{ADMARKT_NS}}}condition").text = CONDITION
 
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 def generate_feed_response():
     try:
         google_root = fetch_google_feed()
-        spreadsheet_images = fetch_spreadsheet_images()
-        mp_xml = create_marktplaats_feed(google_root, spreadsheet_images)
+        spreadsheet_data = fetch_spreadsheet_data()
+        mp_xml = create_marktplaats_feed(google_root, spreadsheet_data)
         return Response(mp_xml, mimetype="application/xml; charset=utf-8")
     except Exception as e:
         return Response(f"<error>{str(e)}</error>", status=500, mimetype="application/xml")
 
-# ROUTES
 @app.route("/feed", methods=["GET", "HEAD"])
-@app.route("/feed.xml", methods=["GET", "HEAD"]) # Deze was ik vergeten!
+@app.route("/feed.xml", methods=["GET", "HEAD"])
 def feed():
     return generate_feed_response()
 
@@ -182,7 +207,7 @@ def health():
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Service is live. Gebruik /feed.xml voor Marktplaats."
+    return "Service is live. Brand, GTIN en MPN zijn nu toegevoegd aan /feed.xml."
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
