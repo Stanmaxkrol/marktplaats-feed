@@ -121,9 +121,15 @@ def create_marktplaats_feed(google_root):
         ET.SubElement(budget_el, "{http://admarkt.marktplaats.nl/schemas/1.0}cpc")  # leeg element, schema vereist
         ET.SubElement(budget_el, "{http://admarkt.marktplaats.nl/schemas/1.0}autobid").text = "true"
 
-        # Verzendopties
+        
+        # Verzendopties met Logica voor Gratis Verzending (> €49,00)
         shipping_el = ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}shippingOptions")
 
+        # Bepaal verzendkosten: 4900 cent = €49,00
+        shipping_cost = "695"
+        if price_cents and int(price_cents) >= 4900:
+            shipping_cost = "0"
+            
         ship = ET.SubElement(shipping_el, "{http://admarkt.marktplaats.nl/schemas/1.0}shippingOption")
         ET.SubElement(ship, "{http://admarkt.marktplaats.nl/schemas/1.0}shippingType").text = "SHIP"
         ET.SubElement(ship, "{http://admarkt.marktplaats.nl/schemas/1.0}cost").text = "695"
