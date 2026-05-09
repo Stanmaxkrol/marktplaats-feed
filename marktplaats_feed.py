@@ -11,7 +11,7 @@ app = Flask(__name__)
 
 # Config
 GOOGLE_FEED_URL = "https://aquariumhuis-friesland.webnode.nl/rss/pf-google_eur.xml"
-# De export-URL van je spreadsheet (format=csv zorgt dat we het makkelijk kunnen inlezen)
+# URL voor CSV-export van de spreadsheet
 SPREADSHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1LVq-LngUlgv7kAj4d03ijcajHcTv-WWNzSBu2QwJHmI/export?format=csv&gid=18228996"
 
 CATEGORY_ID = "396"
@@ -30,19 +30,15 @@ def fetch_google_feed():
     return ET.fromstring(resp.content)
 
 def fetch_spreadsheet_images():
-    """Haalt de spreadsheet op en maakt een dict: { product_id: [image_urls] }"""
+    """Haalt extra afbeeldingen op uit de Google Spreadsheet"""
     try:
         resp = requests.get(SPREADSHEET_CSV_URL, timeout=20)
         resp.raise_for_status()
-        
-        # Gebruik de csv module om de data te parsen
         f = io.StringIO(resp.text)
         reader = csv.DictReader(f)
         
         image_map = {}
         for row in reader:
-            # We gaan ervan uit dat de kolom 'id' de match is met vendorId
-            # En we zoeken naar kolommen 'image_1' t/m 'image_10'
             item_id = row.get('id', '').strip()
             if not item_id:
                 continue
@@ -57,7 +53,7 @@ def fetch_spreadsheet_images():
             image_map[item_id] = images
         return image_map
     except Exception as e:
-        print(f"Fout bij laden spreadsheet: {e}")
+        print(f"Spreadsheet error: {e}")
         return {}
 
 def parse_price_cents(item):
@@ -96,7 +92,6 @@ def create_marktplaats_feed(google_root, spreadsheet_images):
     for item in items:
         ad = ET.SubElement(root, "{http://admarkt.marktplaats.nl/schemas/1.0}ad")
 
-        # Vendor ID (Product ID)
         vendor_id = item.findtext("g:id", default="", namespaces=NS).strip()
         if not vendor_id:
             vendor_id = item.findtext("g:gtin", default="", namespaces=NS).strip()
@@ -105,7 +100,6 @@ def create_marktplaats_feed(google_root, spreadsheet_images):
         
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}vendorId").text = vendor_id
 
-        # Titel & Beschrijving
         title = clean_text(item.findtext("title", default=""), max_length=60)
         if len(title) > 60:
             title = title[:57] + "..."
@@ -114,7 +108,6 @@ def create_marktplaats_feed(google_root, spreadsheet_images):
         desc = clean_text(item.findtext("description", default=""), max_length=4000)
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}description").text = desc
 
-        # Overige basisvelden
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}categoryId").text = CATEGORY_ID
         product_url = item.findtext("link", default="").strip()
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}url").text = product_url
@@ -130,28 +123,20 @@ def create_marktplaats_feed(google_root, spreadsheet_images):
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}sellerName").text = SELLER_NAME
         ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}status").text = "ACTIVE"
 
-        # --- MEDIA / AFBEELDINGEN LOGICA ---
+        # Media sectie
         media_el = ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}media")
         
-        # 1. De hoofdafbeelding uit de Google RSS feed
+        # Hoofdafbeelding
         image_url = (item.findtext("g:image_link", default="", namespaces=NS) or
                      item.findtext("image_link", default="")).strip()
         if image_url:
             ET.SubElement(media_el, "{http://admarkt.marktplaats.nl/schemas/1.0}image", url=image_url)
 
-        # 2. Extra afbeeldingen uit de SPREADSHEET toevoegen (image_1 t/m image_10)
-        # We matchen op de vendor_id
+        # Extra afbeeldingen uit spreadsheet
         extra_images = spreadsheet_images.get(vendor_id, [])
         for extra_url in extra_images:
-            # Voorkom dubbele hoofdafbeelding
             if extra_url != image_url:
                 ET.SubElement(media_el, "{http://admarkt.marktplaats.nl/schemas/1.0}image", url=extra_url)
-
-        # 3. Bestaande additional_image_links uit de RSS (optioneel, als fallback)
-        for add_img in item.findall("g:additional_image_link", namespaces=NS):
-            url = (add_img.text or "").strip()
-            if url and url != image_url and url not in extra_images:
-                ET.SubElement(media_el, "{http://admarkt.marktplaats.nl/schemas/1.0}image", url=url)
 
         # Budget & Verzending
         budget_el = ET.SubElement(ad, "{http://admarkt.marktplaats.nl/schemas/1.0}budget")
@@ -178,23 +163,26 @@ def create_marktplaats_feed(google_root, spreadsheet_images):
 
 def generate_feed_response():
     try:
-        # Haal beide bronnen op
         google_root = fetch_google_feed()
         spreadsheet_images = fetch_spreadsheet_images()
-        
-        # Genereer de Marktplaats XML
         mp_xml = create_marktplaats_feed(google_root, spreadsheet_images)
         return Response(mp_xml, mimetype="application/xml; charset=utf-8")
     except Exception as e:
         return Response(f"<error>{str(e)}</error>", status=500, mimetype="application/xml")
 
+# ROUTES
 @app.route("/feed", methods=["GET", "HEAD"])
+@app.route("/feed.xml", methods=["GET", "HEAD"]) # Deze was ik vergeten!
 def feed():
     return generate_feed_response()
 
+@app.route("/api/health", methods=["GET"])
+def health():
+    return jsonify({"status": "ok"}), 200
+
 @app.route("/", methods=["GET"])
 def home():
-    return "Service is live. Gebruik /feed voor de Marktplaats-feed met extra afbeeldingen."
+    return "Service is live. Gebruik /feed.xml voor Marktplaats."
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
