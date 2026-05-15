@@ -14,7 +14,7 @@ GOOGLE_FEED_URL = "https://aquariumhuis-friesland.webnode.nl/rss/pf-google_eur.x
 SPREADSHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1LVq-LngUlgv7kAj4d03ijcajHcTv-WWNzSBu2QwJHmI/export?format=csv&gid=18228996"
 
 CATEGORY_ID = "396"
-CONDITION = "new"
+CONDITION = "NEW"  # AANGEPAST: XSD vereist hoofdletters (NEW of USED)
 ZIPCODE = "8921SR"
 PHONE_NUMBER = "+31582124300"
 EMAIL_ADVERTISER = "true"
@@ -103,7 +103,8 @@ def create_marktplaats_feed(google_root, spreadsheet_data):
         if not vendor_id:
             vendor_id = item.findtext("g:gtin", default="", namespaces=NS).strip()
         
-        ET.SubElement(ad, f"{{{ADMARKT_NS}}}vendorId").text = vendor_id
+        # AANGEPAST: vendorId mag maximaal 50 karakters zijn volgens de XSD
+        ET.SubElement(ad, f"{{{ADMARKT_NS}}}vendorId").text = vendor_id[:50]
 
         # Titel & Beschrijving
         title = clean_text(item.findtext("title", default=""), max_length=60)
@@ -119,6 +120,9 @@ def create_marktplaats_feed(google_root, spreadsheet_data):
         product_url = item.findtext("link", default="").strip()
         ET.SubElement(ad, f"{{{ADMARKT_NS}}}url").text = product_url
         ET.SubElement(ad, f"{{{ADMARKT_NS}}}vanityUrl").text = product_url
+
+        # AANGEPAST: Postcode direct in ad-niveau geplaatst
+        ET.SubElement(ad, f"{{{ADMARKT_NS}}}postcode").text = ZIPCODE
 
         # EXTRA DATA UIT SPREADSHEET (Brand, GTIN, MPN)
         extra_info = spreadsheet_data.get(vendor_id, {})
@@ -145,6 +149,7 @@ def create_marktplaats_feed(google_root, spreadsheet_data):
         ET.SubElement(ad, f"{{{ADMARKT_NS}}}emailAdvertiser").text = EMAIL_ADVERTISER
         ET.SubElement(ad, f"{{{ADMARKT_NS}}}sellerName").text = SELLER_NAME
         ET.SubElement(ad, f"{{{ADMARKT_NS}}}status").text = "ACTIVE"
+        ET.SubElement(ad, f"{{{ADMARKT_NS}}}condition").text = CONDITION
 
         # Media
         media_el = ET.SubElement(ad, f"{{{ADMARKT_NS}}}media")
@@ -160,7 +165,8 @@ def create_marktplaats_feed(google_root, spreadsheet_data):
 
         # Budget & Verzending
         budget_el = ET.SubElement(ad, f"{{{ADMARKT_NS}}}budget")
-        ET.SubElement(budget_el, f"{{{ADMARKT_NS}}}cpc")
+        # AANGEPAST: Lege <cpc> tag verwijderd omdat dit een validatiefout (integer expected) opleverde. 
+        # Autobid is voldoende.
         ET.SubElement(budget_el, f"{{{ADMARKT_NS}}}autobid").text = "true"
 
         shipping_el = ET.SubElement(ad, f"{{{ADMARKT_NS}}}shippingOptions")
@@ -175,9 +181,7 @@ def create_marktplaats_feed(google_root, spreadsheet_data):
 
         pickup = ET.SubElement(shipping_el, f"{{{ADMARKT_NS}}}shippingOption")
         ET.SubElement(pickup, f"{{{ADMARKT_NS}}}shippingType").text = "PICKUP"
-        ET.SubElement(pickup, f"{{{ADMARKT_NS}}}location").text = ZIPCODE
-
-        ET.SubElement(ad, f"{{{ADMARKT_NS}}}condition").text = CONDITION
+        # AANGEPAST: <location> verwijderd omdat deze niet wordt geaccepteerd binnen <shippingOption> (vervangen door <postcode> hierboven)
 
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
