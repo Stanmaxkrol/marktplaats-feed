@@ -1,4 +1,4 @@
-from flask import Flask, Response, jsonify
+from flask import Flask, Response
 import requests
 import xml.etree.ElementTree as ET
 import os
@@ -14,8 +14,7 @@ GOOGLE_FEED_URL = "https://aquariumhuis-friesland.webnode.nl/rss/pf-google_eur.x
 SPREADSHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1LVq-LngUlgv7kAj4d03ijcajHcTv-WWNzSBu2QwJHmI/export?format=csv&gid=18228996"
 
 CATEGORY_ID = "396"
-CONDITION = "NEW"  # AANGEPAST: XSD vereist hoofdletters (NEW of USED)
-ZIPCODE = "8921SR"
+CONDITION = "new"  # STRIKT: kleine letters
 PHONE_NUMBER = "+31582124300"
 EMAIL_ADVERTISER = "true"
 SELLER_NAME = "Aquariumhuis Friesland"
@@ -29,60 +28,33 @@ def fetch_google_feed():
     return ET.fromstring(resp.content)
 
 def fetch_spreadsheet_data():
-    """Haalt data op en is flexibel met kolomnamen (hoofdletters/kleine letters)"""
     try:
         resp = requests.get(SPREADSHEET_CSV_URL, timeout=20)
         resp.raise_for_status()
         f = io.StringIO(resp.text)
         reader = csv.DictReader(f)
-        
-        product_data = {}
+        data = {}
         for row in reader:
-            # Maak alle keys lowercase voor makkelijker zoeken
             row_low = {k.lower().strip(): v for k, v in row.items() if k}
-            
-            item_id = row_low.get('id', '').strip()
-            if not item_id:
-                continue
-            
-            images = []
-            for i in range(1, 11):
-                url = row_low.get(f'image_{i}', '').strip()
-                if url and url.startswith('http'):
-                    images.append(url)
-            
-            product_data[item_id] = {
-                "images": images,
-                "brand": row_low.get('brand', '').strip(),
-                "gtin": row_low.get('gtin', '').strip(),
-                "mpn": row_low.get('mpn', '').strip()
-            }
-        return product_data
-    except Exception as e:
-        print(f"Spreadsheet error: {e}")
-        return {}
+            id_val = row_low.get('id', '').strip()
+            if not id_val: continue
+            imgs = [row_low.get(f'image_{i}', '').strip() for i in range(1, 11) 
+                    if row_low.get(f'image_{i}', '').strip().startswith('http')]
+            data[id_val] = {"images": imgs, "brand": row_low.get('brand', ''), "gtin": row_low.get('gtin', ''), "mpn": row_low.get('mpn', '')}
+        return data
+    except: return {}
 
-def parse_price_cents(item):
-    raw = (item.findtext("g:price", default="", namespaces=NS) or
-           item.findtext("price", default="")).strip()
-    if not raw:
-        return None
-    value = raw.replace("EUR", "").strip().replace(",", ".")
-    try:
-        return str(int(round(float(value) * 100)))
-    except ValueError:
-        return None
-
-def clean_text(text, max_length=None):
-    if not text:
-        return ""
-    text = text.strip()
+def clean_text(text, max_len=None):
+    if not text: return ""
+    # Verwijder HTML tags
     text = re.sub(r"<[^>]+>", "", text)
-    text = html.unescape(html.unescape(text))
-    text = text.replace("\xa0", " ").replace("&nbsp;", " ")
-    text = re.sub(r"\s+", " ", text)
-    if max_length:
-        text = text[:max_length]
+    # Decodeer HTML entities (zoals &nbsp;)
+    text = html.unescape(text)
+    # Verwijder overtollige witruimte
+    text = " ".join(text.split())
+    # Belangrijk: ElementTree ontsnapt de '&' straks zelf naar '&amp;' 
+    # mits we niet handmatig met strings gaan rommelen.
+    if max_len: text = text[:max_len]
     return text
 
 def create_marktplaats_feed(google_root, spreadsheet_data):
@@ -93,116 +65,84 @@ def create_marktplaats_feed(google_root, spreadsheet_data):
     items = google_root.findall(".//item")
     if not items:
         channel = google_root.find(".//channel")
-        if channel is not None:
-            items = channel.findall(".//item")
+        if channel is not None: items = channel.findall(".//item")
 
     for item in items:
         ad = ET.SubElement(root, f"{{{ADMARKT_NS}}}ad")
+        v_id = (item.findtext("g:id", default="", namespaces=NS) or item.findtext("id", "")).strip()
+        extra = spreadsheet_data.get(v_id, {})
 
-        vendor_id = item.findtext("g:id", default="", namespaces=NS).strip()
-        if not vendor_id:
-            vendor_id = item.findtext("g:gtin", default="", namespaces=NS).strip()
-        
-        # AANGEPAST: vendorId mag maximaal 50 karakters zijn volgens de XSD
-        ET.SubElement(ad, f"{{{ADMARKT_NS}}}vendorId").text = vendor_id[:50]
-
-        # Titel & Beschrijving
-        title = clean_text(item.findtext("title", default=""), max_length=60)
-        if len(title) > 60:
-            title = title[:57] + "..."
-        ET.SubElement(ad, f"{{{ADMARKT_NS}}}title").text = title
-        
-        desc = clean_text(item.findtext("description", default=""), max_length=4000)
-        ET.SubElement(ad, f"{{{ADMARKT_NS}}}description").text = desc
-
-        # Basis velden
+        # --- VOLGORDE VOLGENS XSD SEQUENCE ---
+        ET.SubElement(ad, f"{{{ADMARKT_NS}}}vendorId").text = v_id[:50]
+        ET.SubElement(ad, f"{{{ADMARKT_NS}}}title").text = clean_text(item.findtext("title", ""), 60)
+        ET.SubElement(ad, f"{{{ADMARKT_NS}}}description").text = clean_text(item.findtext("description", ""), 4000)
         ET.SubElement(ad, f"{{{ADMARKT_NS}}}categoryId").text = CATEGORY_ID
-        product_url = item.findtext("link", default="").strip()
-        ET.SubElement(ad, f"{{{ADMARKT_NS}}}url").text = product_url
-        ET.SubElement(ad, f"{{{ADMARKT_NS}}}vanityUrl").text = product_url
-
-        # AANGEPAST: Postcode direct in ad-niveau geplaatst
-        ET.SubElement(ad, f"{{{ADMARKT_NS}}}postcode").text = ZIPCODE
-
-        # EXTRA DATA UIT SPREADSHEET (Brand, GTIN, MPN)
-        extra_info = spreadsheet_data.get(vendor_id, {})
         
-        brand = extra_info.get("brand", "")
-        if brand:
-            ET.SubElement(ad, f"{{{ADMARKT_NS}}}brand").text = brand[:70]
-
-        gtin = extra_info.get("gtin", "")
-        if gtin:
-            ET.SubElement(ad, f"{{{ADMARKT_NS}}}gtin").text = gtin[:50]
-
-        mpn = extra_info.get("mpn", "")
-        if mpn:
-            ET.SubElement(ad, f"{{{ADMARKT_NS}}}mpn").text = mpn[:70]
-
-        # Prijs
-        price_cents = parse_price_cents(item)
-        if price_cents:
-            ET.SubElement(ad, f"{{{ADMARKT_NS}}}price").text = price_cents
-            ET.SubElement(ad, f"{{{ADMARKT_NS}}}priceType").text = "FIXED_PRICE"
-
-        ET.SubElement(ad, f"{{{ADMARKT_NS}}}phoneNumber").text = PHONE_NUMBER
-        ET.SubElement(ad, f"{{{ADMARKT_NS}}}emailAdvertiser").text = EMAIL_ADVERTISER
+        link = item.findtext("link", "").strip()
+        ET.SubElement(ad, f"{{{ADMARKT_NS}}}url").text = link
+        ET.SubElement(ad, f"{{{ADMARKT_NS}}}vanityUrl").text = link
         ET.SubElement(ad, f"{{{ADMARKT_NS}}}sellerName").text = SELLER_NAME
-        ET.SubElement(ad, f"{{{ADMARKT_NS}}}status").text = "ACTIVE"
-        ET.SubElement(ad, f"{{{ADMARKT_NS}}}condition").text = CONDITION
+        
+        # Prijs
+        raw_p = (item.findtext("g:price", default="", namespaces=NS) or item.findtext("price", "")).strip()
+        price_cents = "0"
+        if raw_p:
+            try:
+                val = float(raw_p.replace("EUR", "").replace(",", ".").strip())
+                price_cents = str(int(round(val * 100)))
+            except: pass
+        
+        ET.SubElement(ad, f"{{{ADMARKT_NS}}}price").text = price_cents
+        ET.SubElement(ad, f"{{{ADMARKT_NS}}}priceType").text = "FIXED_PRICE"
 
         # Media
         media_el = ET.SubElement(ad, f"{{{ADMARKT_NS}}}media")
-        image_url = (item.findtext("g:image_link", default="", namespaces=NS) or
-                     item.findtext("image_link", default="")).strip()
-        if image_url:
-            ET.SubElement(media_el, f"{{{ADMARKT_NS}}}image", url=image_url)
+        main_img = (item.findtext("g:image_link", default="", namespaces=NS) or item.findtext("image_link", "")).strip()
+        if main_img:
+            ET.SubElement(media_el, f"{{{ADMARKT_NS}}}image", url=main_img)
+        for img in extra.get("images", []):
+            if img != main_img:
+                ET.SubElement(media_el, f"{{{ADMARKT_NS}}}image", url=img)
 
-        extra_images = extra_info.get("images", [])
-        for extra_url in extra_images:
-            if extra_url != image_url:
-                ET.SubElement(media_el, f"{{{ADMARKT_NS}}}image", url=extra_url)
-
-        # Budget & Verzending
+        # Budget
         budget_el = ET.SubElement(ad, f"{{{ADMARKT_NS}}}budget")
-        # AANGEPAST: Lege <cpc> tag verwijderd omdat dit een validatiefout (integer expected) opleverde. 
-        # Autobid is voldoende.
+        ET.SubElement(budget_el, f"{{{ADMARKT_NS}}}cpc").text = "1"  # Verplicht getal voor XSD
         ET.SubElement(budget_el, f"{{{ADMARKT_NS}}}autobid").text = "true"
 
+        # Shipping
         shipping_el = ET.SubElement(ad, f"{{{ADMARKT_NS}}}shippingOptions")
-        shipping_cost = "695"
-        if price_cents and int(price_cents) >= 4900:
-            shipping_cost = "0"
-            
-        ship = ET.SubElement(shipping_el, f"{{{ADMARKT_NS}}}shippingOption")
-        ET.SubElement(ship, f"{{{ADMARKT_NS}}}shippingType").text = "SHIP"
-        ET.SubElement(ship, f"{{{ADMARKT_NS}}}cost").text = shipping_cost
-        ET.SubElement(ship, f"{{{ADMARKT_NS}}}time").text = "2d-5d"
+        cost = "695" if int(price_cents) < 4900 else "0"
+        s1 = ET.SubElement(shipping_el, f"{{{ADMARKT_NS}}}shippingOption")
+        ET.SubElement(s1, f"{{{ADMARKT_NS}}}shippingType").text = "SHIP"
+        ET.SubElement(s1, f"{{{ADMARKT_NS}}}cost").text = cost
+        ET.SubElement(s1, f"{{{ADMARKT_NS}}}time").text = "2d-5d"
+        s2 = ET.SubElement(shipping_el, f"{{{ADMARKT_NS}}}shippingOption")
+        ET.SubElement(s2, f"{{{ADMARKT_NS}}}shippingType").text = "PICKUP"
 
-        pickup = ET.SubElement(shipping_el, f"{{{ADMARKT_NS}}}shippingOption")
-        ET.SubElement(pickup, f"{{{ADMARKT_NS}}}shippingType").text = "PICKUP"
-        # AANGEPAST: <location> verwijderd omdat deze niet wordt geaccepteerd binnen <shippingOption> (vervangen door <postcode> hierboven)
+        # Contact & Status
+        ET.SubElement(ad, f"{{{ADMARKT_NS}}}phoneNumber").text = PHONE_NUMBER
+        ET.SubElement(ad, f"{{{ADMARKT_NS}}}emailAdvertiser").text = EMAIL_ADVERTISER
+        ET.SubElement(ad, f"{{{ADMARKT_NS}}}status").text = "ACTIVE"
+        
+        # Attributen aan het einde (Belangrijk voor XSD sequence)
+        if extra.get("gtin"):
+            ET.SubElement(ad, f"{{{ADMARKT_NS}}}gtin").text = clean_text(extra["gtin"], 50)
+        if extra.get("mpn"):
+            ET.SubElement(ad, f"{{{ADMARKT_NS}}}mpn").text = clean_text(extra["mpn"], 70)
+        if extra.get("brand"):
+            ET.SubElement(ad, f"{{{ADMARKT_NS}}}brand").text = clean_text(extra["brand"], 70)
+            
+        ET.SubElement(ad, f"{{{ADMARKT_NS}}}condition").text = CONDITION
 
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
-def generate_feed_response():
+@app.route("/feed.xml")
+def feed():
     try:
-        google_root = fetch_google_feed()
-        spreadsheet_data = fetch_spreadsheet_data()
-        mp_xml = create_marktplaats_feed(google_root, spreadsheet_data)
-        return Response(mp_xml, mimetype="application/xml; charset=utf-8")
+        xml_output = create_marktplaats_feed(fetch_google_feed(), fetch_spreadsheet_data())
+        return Response(xml_output, mimetype="application/xml")
     except Exception as e:
         return Response(f"<error>{str(e)}</error>", status=500, mimetype="application/xml")
 
-@app.route("/feed", methods=["GET", "HEAD"])
-@app.route("/feed.xml", methods=["GET", "HEAD"])
-def feed():
-    return generate_feed_response()
-
-@app.route("/", methods=["GET"])
-def home():
-    return "Service live. Check /feed.xml voor brand, gtin en mpn."
-
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
