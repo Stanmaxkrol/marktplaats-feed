@@ -40,16 +40,26 @@ def fetch_spreadsheet_data():
             if not id_val: continue
             imgs = [row_low.get(f'image_{i}', '').strip() for i in range(1, 11) 
                     if row_low.get(f'image_{i}', '').strip().startswith('http')]
-            data[id_val] = {"images": imgs, "brand": row_low.get('brand', ''), "gtin": row_low.get('gtin', ''), "mpn": row_low.get('mpn', '')}
+            data[id_val] = {
+                "images": imgs, 
+                "brand": row_low.get('brand', ''), 
+                "gtin": row_low.get('gtin', ''), 
+                "mpn": row_low.get('mpn', '')
+            }
         return data
     except: return {}
 
 def clean_text(text, max_len=None):
     if not text: return ""
-    # Hardhandig verwijderen van nbsp en andere XML-vijanden
+    # Verwijder HTML entities en harde spaties
     text = text.replace("&nbsp;", " ").replace("\xa0", " ")
+    # Verwijder HTML tags
     text = re.sub(r"<[^>]+>", "", text)
+    # Decodeer alle mogelijke HTML encoding (zoals &amp; naar &)
     text = html.unescape(html.unescape(text))
+    # Belangrijk: verwijder losse ampersands die XML breken als ze niet ontsnapt zijn
+    # ElementTree ontsnapt '&' naar '&amp;' bij het genereren, maar we moeten 
+    # zorgen dat de input schoon is.
     text = " ".join(text.split())
     if max_len: text = text[:max_len].strip()
     return text
@@ -69,17 +79,24 @@ def create_marktplaats_feed(google_root, spreadsheet_data):
         v_id = (item.findtext("g:id", default="", namespaces=NS) or item.findtext("id", "")).strip()
         extra = spreadsheet_data.get(v_id, {})
 
-        # VOLGORDE IS HEILIG VOOR XSD
+        # 1. vendorId
         ET.SubElement(ad, f"{{{ADMARKT_NS}}}vendorId").text = v_id[:50]
+        # 2. title
         ET.SubElement(ad, f"{{{ADMARKT_NS}}}title").text = clean_text(item.findtext("title", ""), 60)
+        # 3. description
         ET.SubElement(ad, f"{{{ADMARKT_NS}}}description").text = clean_text(item.findtext("description", ""), 4000)
+        # 4. categoryId
         ET.SubElement(ad, f"{{{ADMARKT_NS}}}categoryId").text = CATEGORY_ID
         
+        # 5 & 6. URLs
         link = item.findtext("link", "").strip()
         ET.SubElement(ad, f"{{{ADMARKT_NS}}}url").text = link
         ET.SubElement(ad, f"{{{ADMARKT_NS}}}vanityUrl").text = link
+        
+        # 7. sellerName
         ET.SubElement(ad, f"{{{ADMARKT_NS}}}sellerName").text = SELLER_NAME
         
+        # 8 & 9. Price
         raw_p = (item.findtext("g:price", default="", namespaces=NS) or item.findtext("price", "")).strip()
         price_cents = "0"
         if raw_p:
@@ -87,10 +104,10 @@ def create_marktplaats_feed(google_root, spreadsheet_data):
                 val = float(raw_p.replace("EUR", "").replace(",", ".").strip())
                 price_cents = str(int(round(val * 100)))
             except: pass
-        
         ET.SubElement(ad, f"{{{ADMARKT_NS}}}price").text = price_cents
         ET.SubElement(ad, f"{{{ADMARKT_NS}}}priceType").text = "FIXED_PRICE"
 
+        # 10. Media
         media_el = ET.SubElement(ad, f"{{{ADMARKT_NS}}}media")
         main_img = (item.findtext("g:image_link", default="", namespaces=NS) or item.findtext("image_link", "")).strip()
         if main_img:
@@ -99,10 +116,12 @@ def create_marktplaats_feed(google_root, spreadsheet_data):
             if img != main_img:
                 ET.SubElement(media_el, f"{{{ADMARKT_NS}}}image", url=img)
 
+        # 11. Budget
         budget_el = ET.SubElement(ad, f"{{{ADMARKT_NS}}}budget")
         ET.SubElement(budget_el, f"{{{ADMARKT_NS}}}cpc").text = "1"
         ET.SubElement(budget_el, f"{{{ADMARKT_NS}}}autobid").text = "true"
 
+        # 12. Shipping
         shipping_el = ET.SubElement(ad, f"{{{ADMARKT_NS}}}shippingOptions")
         cost = "695" if int(price_cents) < 4900 else "0"
         s1 = ET.SubElement(shipping_el, f"{{{ADMARKT_NS}}}shippingOption")
@@ -112,16 +131,25 @@ def create_marktplaats_feed(google_root, spreadsheet_data):
         s2 = ET.SubElement(shipping_el, f"{{{ADMARKT_NS}}}shippingOption")
         ET.SubElement(s2, f"{{{ADMARKT_NS}}}shippingType").text = "PICKUP"
 
+        # 13, 14, 15. Contact/Status
         ET.SubElement(ad, f"{{{ADMARKT_NS}}}phoneNumber").text = PHONE_NUMBER
         ET.SubElement(ad, f"{{{ADMARKT_NS}}}emailAdvertiser").text = EMAIL_ADVERTISER
         ET.SubElement(ad, f"{{{ADMARKT_NS}}}status").text = "ACTIVE"
         
-        if extra.get("gtin"):
-            ET.SubElement(ad, f"{{{ADMARKT_NS}}}gtin").text = clean_text(extra["gtin"], 50)
-        if extra.get("mpn"):
-            ET.SubElement(ad, f"{{{ADMARKT_NS}}}mpn").text = clean_text(extra["mpn"], 70)
-        if extra.get("brand"):
-            ET.SubElement(ad, f"{{{ADMARKT_NS}}}brand").text = clean_text(extra["brand"], 70)
+        # 16+. Attributes (GTIN, MPN, Brand, Condition)
+        # GTIN minLength is meestal 8, maar we checken op 1 voor de zekerheid
+        gtin_val = clean_text(extra.get("gtin", ""))
+        if len(gtin_val) >= 2:
+            ET.SubElement(ad, f"{{{ADMARKT_NS}}}gtin").text = gtin_val[:50]
+            
+        # MPN FIX: Moet minimaal 2 tekens zijn
+        mpn_val = clean_text(extra.get("mpn", ""))
+        if len(mpn_val) >= 2:
+            ET.SubElement(ad, f"{{{ADMARKT_NS}}}mpn").text = mpn_val[:70]
+            
+        brand_val = clean_text(extra.get("brand", ""))
+        if brand_val:
+            ET.SubElement(ad, f"{{{ADMARKT_NS}}}brand").text = brand_val[:70]
             
         ET.SubElement(ad, f"{{{ADMARKT_NS}}}condition").text = CONDITION
 
