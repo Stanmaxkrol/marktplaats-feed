@@ -14,7 +14,7 @@ GOOGLE_FEED_URL = "https://aquariumhuis-friesland.webnode.nl/rss/pf-google_eur.x
 SPREADSHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1LVq-LngUlgv7kAj4d03ijcajHcTv-WWNzSBu2QwJHmI/export?format=csv&gid=18228996"
 
 CATEGORY_ID = "396"
-CONDITION = "new"  # STRIKT: kleine letters
+CONDITION = "new" 
 PHONE_NUMBER = "+31582124300"
 EMAIL_ADVERTISER = "true"
 SELLER_NAME = "Aquariumhuis Friesland"
@@ -46,15 +46,12 @@ def fetch_spreadsheet_data():
 
 def clean_text(text, max_len=None):
     if not text: return ""
-    # Verwijder HTML tags
+    # Hardhandig verwijderen van nbsp en andere XML-vijanden
+    text = text.replace("&nbsp;", " ").replace("\xa0", " ")
     text = re.sub(r"<[^>]+>", "", text)
-    # Decodeer HTML entities (zoals &nbsp;)
-    text = html.unescape(text)
-    # Verwijder overtollige witruimte
+    text = html.unescape(html.unescape(text))
     text = " ".join(text.split())
-    # Belangrijk: ElementTree ontsnapt de '&' straks zelf naar '&amp;' 
-    # mits we niet handmatig met strings gaan rommelen.
-    if max_len: text = text[:max_len]
+    if max_len: text = text[:max_len].strip()
     return text
 
 def create_marktplaats_feed(google_root, spreadsheet_data):
@@ -72,7 +69,7 @@ def create_marktplaats_feed(google_root, spreadsheet_data):
         v_id = (item.findtext("g:id", default="", namespaces=NS) or item.findtext("id", "")).strip()
         extra = spreadsheet_data.get(v_id, {})
 
-        # --- VOLGORDE VOLGENS XSD SEQUENCE ---
+        # VOLGORDE IS HEILIG VOOR XSD
         ET.SubElement(ad, f"{{{ADMARKT_NS}}}vendorId").text = v_id[:50]
         ET.SubElement(ad, f"{{{ADMARKT_NS}}}title").text = clean_text(item.findtext("title", ""), 60)
         ET.SubElement(ad, f"{{{ADMARKT_NS}}}description").text = clean_text(item.findtext("description", ""), 4000)
@@ -83,7 +80,6 @@ def create_marktplaats_feed(google_root, spreadsheet_data):
         ET.SubElement(ad, f"{{{ADMARKT_NS}}}vanityUrl").text = link
         ET.SubElement(ad, f"{{{ADMARKT_NS}}}sellerName").text = SELLER_NAME
         
-        # Prijs
         raw_p = (item.findtext("g:price", default="", namespaces=NS) or item.findtext("price", "")).strip()
         price_cents = "0"
         if raw_p:
@@ -95,7 +91,6 @@ def create_marktplaats_feed(google_root, spreadsheet_data):
         ET.SubElement(ad, f"{{{ADMARKT_NS}}}price").text = price_cents
         ET.SubElement(ad, f"{{{ADMARKT_NS}}}priceType").text = "FIXED_PRICE"
 
-        # Media
         media_el = ET.SubElement(ad, f"{{{ADMARKT_NS}}}media")
         main_img = (item.findtext("g:image_link", default="", namespaces=NS) or item.findtext("image_link", "")).strip()
         if main_img:
@@ -104,12 +99,10 @@ def create_marktplaats_feed(google_root, spreadsheet_data):
             if img != main_img:
                 ET.SubElement(media_el, f"{{{ADMARKT_NS}}}image", url=img)
 
-        # Budget
         budget_el = ET.SubElement(ad, f"{{{ADMARKT_NS}}}budget")
-        ET.SubElement(budget_el, f"{{{ADMARKT_NS}}}cpc").text = "1"  # Verplicht getal voor XSD
+        ET.SubElement(budget_el, f"{{{ADMARKT_NS}}}cpc").text = "1"
         ET.SubElement(budget_el, f"{{{ADMARKT_NS}}}autobid").text = "true"
 
-        # Shipping
         shipping_el = ET.SubElement(ad, f"{{{ADMARKT_NS}}}shippingOptions")
         cost = "695" if int(price_cents) < 4900 else "0"
         s1 = ET.SubElement(shipping_el, f"{{{ADMARKT_NS}}}shippingOption")
@@ -119,12 +112,10 @@ def create_marktplaats_feed(google_root, spreadsheet_data):
         s2 = ET.SubElement(shipping_el, f"{{{ADMARKT_NS}}}shippingOption")
         ET.SubElement(s2, f"{{{ADMARKT_NS}}}shippingType").text = "PICKUP"
 
-        # Contact & Status
         ET.SubElement(ad, f"{{{ADMARKT_NS}}}phoneNumber").text = PHONE_NUMBER
         ET.SubElement(ad, f"{{{ADMARKT_NS}}}emailAdvertiser").text = EMAIL_ADVERTISER
         ET.SubElement(ad, f"{{{ADMARKT_NS}}}status").text = "ACTIVE"
         
-        # Attributen aan het einde (Belangrijk voor XSD sequence)
         if extra.get("gtin"):
             ET.SubElement(ad, f"{{{ADMARKT_NS}}}gtin").text = clean_text(extra["gtin"], 50)
         if extra.get("mpn"):
