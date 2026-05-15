@@ -51,19 +51,30 @@ def fetch_spreadsheet_data():
 
 def clean_text(text, max_len=None):
     if not text: return ""
-    # Verwijder HTML entities en harde spaties
-    text = text.replace("&nbsp;", " ").replace("\xa0", " ")
-    # Verwijder HTML tags
+    
+    # 1. Verwijder HTML tags
     text = re.sub(r"<[^>]+>", "", text)
-    # Decodeer alle mogelijke HTML encoding (zoals &amp; naar &)
-    text = html.unescape(html.unescape(text))
-    # Belangrijk: verwijder losse ampersands die XML breken als ze niet ontsnapt zijn
-    # ElementTree ontsnapt '&' naar '&amp;' bij het genereren, maar we moeten 
-    # zorgen dat de input schoon is.
+    
+    # 2. Vervang bekende probleem-entiteiten door normale tekens
+    text = text.replace("&nbsp;", " ").replace("\xa0", " ")
+    
+    # 3. Decodeer alles naar platte tekst (zet &amp; om naar &)
+    # We doen dit herhaaldelijk om 'double encoding' te voorkomen
+    text = html.unescape(text)
+    text = html.unescape(text)
+    
+    # 4. CRUCIAL: Zet alle losse '&' tekens om naar de XML-veilige '&amp;'
+    # We doen dit handmatig omdat sommige parsers vallen over de automatische conversie
+    text = text.replace("&", "&amp;")
+    
+    # 5. Verwijder dubbele spaties en vreemde witruimte
     text = " ".join(text.split())
-    if max_len: text = text[:max_len].strip()
+    
+    if max_len: 
+        text = text[:max_len].strip()
+        
     return text
-
+    
 def create_marktplaats_feed(google_root, spreadsheet_data):
     ADMARKT_NS = "http://admarkt.marktplaats.nl/schemas/1.0"
     ET.register_namespace('admarkt', ADMARKT_NS)
