@@ -141,7 +141,7 @@ def create_marktplaats_feed(google_root, spreadsheet_data):
         ET.SubElement(s1, f"{{{ADMARKT_NS}}}time").text = "2d-5d"
         s2 = ET.SubElement(shipping_el, f"{{{ADMARKT_NS}}}shippingOption")
         ET.SubElement(s2, f"{{{ADMARKT_NS}}}shippingType").text = "PICKUP"
-        ET.SubElement(s2, f"{{{ADMARKT_NS}}}pickupLocation").text = "8921EG" # Aangepast: postcode toegevoegd voor afhaallocatie foutmelding
+        ET.SubElement(s2, f"{{{ADMARKT_NS}}}location").text = "8921EG" # Aangepast: postcode toegevoegd voor afhaallocatie foutmelding
 
         # 13, 14, 15. Contact/Status
         ET.SubElement(ad, f"{{{ADMARKT_NS}}}phoneNumber").text = PHONE_NUMBER
