@@ -129,7 +129,7 @@ def create_marktplaats_feed(google_root, spreadsheet_data):
 
         # 11. Budget
         budget_el = ET.SubElement(ad, f"{{{ADMARKT_NS}}}budget")
-        ET.SubElement(budget_el, f"{{{ADMARKT_NS}}}cpc").text = "2"  # Aangepast: Minimum CPC is 2 (2 cent)
+        ET.SubElement(budget_el, f"{{{ADMARKT_NS}}}cpc").text = "5"  # Aangepast: Minimum CPC is 2 (2 cent)
         ET.SubElement(budget_el, f"{{{ADMARKT_NS}}}autobid").text = "true"
 
         # 12. Shipping
