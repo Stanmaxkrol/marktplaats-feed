@@ -129,7 +129,7 @@ def create_marktplaats_feed(google_root, spreadsheet_data):
 
         # 11. Budget
         budget_el = ET.SubElement(ad, f"{{{ADMARKT_NS}}}budget")
-        ET.SubElement(budget_el, f"{{{ADMARKT_NS}}}cpc").text = "1"
+        ET.SubElement(budget_el, f"{{{ADMARKT_NS}}}cpc").text = "2"  # Aangepast: Minimum CPC is 2 (2 cent)
         ET.SubElement(budget_el, f"{{{ADMARKT_NS}}}autobid").text = "true"
 
         # 12. Shipping
@@ -141,6 +141,7 @@ def create_marktplaats_feed(google_root, spreadsheet_data):
         ET.SubElement(s1, f"{{{ADMARKT_NS}}}time").text = "2d-5d"
         s2 = ET.SubElement(shipping_el, f"{{{ADMARKT_NS}}}shippingOption")
         ET.SubElement(s2, f"{{{ADMARKT_NS}}}shippingType").text = "PICKUP"
+        ET.SubElement(s2, f"{{{ADMARKT_NS}}}pickupLocation").text = "8921EG" # Aangepast: postcode toegevoegd voor afhaallocatie foutmelding
 
         # 13, 14, 15. Contact/Status
         ET.SubElement(ad, f"{{{ADMARKT_NS}}}phoneNumber").text = PHONE_NUMBER
