@@ -90,8 +90,8 @@ def create_marktplaats_feed(google_root, spreadsheet_data):
         v_id = (item.findtext("g:id", default="", namespaces=NS) or item.findtext("id", "")).strip()
         extra = spreadsheet_data.get(v_id, {})
 
-        # 1. vendorId
-        ET.SubElement(ad, f"{{{ADMARKT_NS}}}vendorId").text = v_id[:50]
+        # 1. vendorId (Aangepast met MP_ prefix om het Marktplaats-geheugen te omzeilen)
+        ET.SubElement(ad, f"{{{ADMARKT_NS}}}vendorId").text = f"MP_{v_id}"[:50]
         # 2. title
         ET.SubElement(ad, f"{{{ADMARKT_NS}}}title").text = clean_text(item.findtext("title", ""), 60)
         # 3. description
